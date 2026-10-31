@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# Reviewer (Astra 6 via Codex CLI). Codex runs read-only; this script owns every file write,
+# so the report/task bookkeeping is deterministic no matter what the model returns.
+#
+#   team-review plan  <feature_dir> <round>                 # → plan-review.md
+#   team-review code  <feature_dir> <iter>                  # → review-report.md + tasks R<iter>-NN
+#   team-review final <feature_dir> <iter> approved|incomplete   # → final-report.md
+#
+# Prints a compact JSON summary on stdout. Model, effort and limits come from ../config.sh;
+# TEAM_CODEX_HOME overrides the Codex login dir (~/.codex).
+set -euo pipefail
+
+mode=${1:?usage: team-review plan|code|final <feature_dir> <n> [status]}
+dir=$(cd "${2:?feature_dir required}" && pwd)
+n=${3:?n required}
+final_status=${4:-}
+
+TEAM="$HOME/.claude/team"
+# shellcheck source=/dev/null
+. "$TEAM/config.sh"
+repo=$(git -C "$dir" rev-parse --show-toplevel)
+cd "$repo"
+
+# Some shells export a CODEX_HOME that has no login; pin the real one.
+export CODEX_HOME="${TEAM_CODEX_HOME:-$HOME/.codex}"
+model=$TEAM_REVIEW_MODEL
+effort=$TEAM_REVIEW_EFFORT
+
+export FEATURE_DIR="$dir" ITER="$n" FINAL_STATUS="$final_status"
+export MAX_ITER="$TEAM_MAX_CODE_REVIEWS" MAX_PLAN_ROUNDS="$TEAM_MAX_PLAN_ROUNDS"
+export BASE_SHA BASE_REF HEAD_SHA PREV_SHA GATES_LOG GATES_PASSED PREV_REVIEWS
+BASE_SHA=$(jq -r '.base_sha // empty' "$dir/state.json")
+BASE_REF=$(jq -r '.base_ref' "$dir/state.json")
+HEAD_SHA=$(git rev-parse HEAD)
+
+render() { perl -pe 's/\{\{(\w+)\}\}/exists $ENV{$1} ? $ENV{$1} : "{{$1}}"/ge' "$TEAM/prompts/$1.md"; }
+
+run_codex() { # <prompt_file> <out_file> [schema]
+  local schema_args=()
+  [ -n "${3:-}" ] && schema_args=(--output-schema "$3")
+  codex exec -C "$repo" -m "$model" -c "model_reasoning_effort=\"$effort\"" \
+    -s read-only --color never ${schema_args[@]+"${schema_args[@]}"} -o "$2" - <"$1" >"$2.log" 2>&1 || {
+    jq -n --arg log "$2.log" '{verdict: "ERROR", error: "codex exec failed", log: $log}'
+    exit 1
+  }
+  [ -s "$2" ] || { jq -n --arg log "$2.log" '{verdict: "ERROR", error: "empty codex output", log: $log}'; exit 1; }
+}
+
+# Give findings stable ids (<prefix><n>-NN), and derive the verdict from the findings: an
+# APPROVED with an open blocker/major (new or carried over) is downgraded.
+normalize() { # <raw_json> <prefix> <out_json>
+  jq --arg p "$2" --arg n "$n" --arg head "$HEAD_SHA" '
+    .findings |= (to_entries | map(.value + {id: ($p + $n + "-" + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))}))
+    | .model_verdict = .verdict
+    | if ([.findings[] | select(.severity != "minor")] | length) > 0
+         or ([.previous_findings[] | select(.status != "resolved")] | length) > 0
+      then .verdict = "CHANGES_REQUESTED" else . end
+    | . + {iteration: ($n | tonumber), head_sha: $head}' "$1" >"$3"
+}
+
+report_section() { # <json> <title>
+  jq -r --arg title "$2" '
+    "## \($title) — \(.verdict)\n\n\(.summary)\n"
+    + (if (.previous_findings | length) > 0 then
+        "\n### Seguimiento de hallazgos previos\n\n"
+        + (.previous_findings | map("- **\(.id)** — \(.status): \(.note)") | join("\n")) + "\n"
+       else "" end)
+    + (if (.findings | length) > 0 then
+        "\n### Hallazgos\n\n"
+        + (.findings | map("- **\(.id)** `\(.severity)` \(.title) — `\(.location)`\n  \(.detail)"
+            + (if .severity != "minor" then "\n  → Tarea: \(.task)" else "" end)) | join("\n")) + "\n"
+       else "\n_Sin hallazgos nuevos._\n" end)' "$1"
+}
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+over_limit() { # <max>
+  jq -n --argjson n "$n" --argjson max "$1" '{verdict: "ERROR", error: "round \($n) exceeds the limit of \($max)"}'
+  exit 1
+}
+
+case "$mode" in
+  plan)
+    [ "$n" -le "$MAX_PLAN_ROUNDS" ] || over_limit "$MAX_PLAN_ROUNDS"
+    out="$dir/reviews/plan-$n.json"
+    PREV_REVIEWS=$(ls "$dir"/reviews/plan-*.json 2>/dev/null | grep -v "plan-$n.json" | tr '\n' ' ' || true)
+    render reviewer-plan >"$tmp/prompt.md"
+    run_codex "$tmp/prompt.md" "$tmp/raw.json" "$TEAM/schemas/verdict.json"
+    normalize "$tmp/raw.json" P "$out"
+    [ -f "$dir/plan-review.md" ] || printf '# Revisión del plan\n\nReviewer: %s\n\n' "$model" >"$dir/plan-review.md"
+    { report_section "$out" "Ronda $n"; echo; } >>"$dir/plan-review.md"
+    ;;
+
+  code)
+    [ "$n" -le "$MAX_ITER" ] || over_limit "$MAX_ITER"
+    [ -n "$BASE_SHA" ] || { echo '{"verdict":"ERROR","error":"base_sha not set — run team-start"}'; exit 1; }
+    out="$dir/reviews/code-$n.json"
+    prev="$dir/reviews/code-$((n - 1)).json"
+    PREV_SHA=$([ -f "$prev" ] && jq -r '.head_sha' "$prev" || echo "$BASE_SHA")
+    PREV_REVIEWS=$(ls "$dir"/reviews/code-*.json 2>/dev/null | grep -v "code-$n.json" | tr '\n' ' ' || true)
+    gates_json="$dir/gates/iter-$n.json"
+    GATES_LOG="$dir/gates/iter-$n.log"
+    GATES_PASSED=$([ -f "$gates_json" ] && jq -r '.passed' "$gates_json" || echo "unknown")
+
+    render reviewer-code >"$tmp/prompt.md"
+    run_codex "$tmp/prompt.md" "$tmp/raw.json" "$TEAM/schemas/verdict.json"
+    normalize "$tmp/raw.json" R "$tmp/norm.json"
+
+    # Failing gates can never be approved, whatever the model says.
+    if [ "$GATES_PASSED" = "false" ]; then
+      jq --arg n "$n" --arg log "$GATES_LOG" '
+        .verdict = "CHANGES_REQUESTED"
+        | .findings += [{id: ("R" + $n + "-G1"), severity: "blocker", location: $log,
+            title: "Los gates automáticos fallan", detail: "Tests o lint fallaron en esta iteración.",
+            task: ("Hacer pasar los gates; ver " + $log)}]' "$tmp/norm.json" >"$out"
+    else
+      cp "$tmp/norm.json" "$out"
+    fi
+
+    [ -f "$dir/review-report.md" ] || printf '# Reporte de revisión\n\nReviewer: %s · Base: `%s`\n\n' "$model" "$BASE_SHA" >"$dir/review-report.md"
+    { report_section "$out" "Iteración $n/$MAX_ITER · \`$(git rev-parse --short HEAD)\` · gates: $GATES_PASSED"; echo; } >>"$dir/review-report.md"
+
+    tasks=$(jq -r '.findings | map(select(.severity != "minor")) | map("- [ ] \(.id) [\(.severity)] \(.task) (`\(.location)`)") | join("\n")' "$out")
+    if [ -n "$tasks" ]; then
+      printf '\n## Correcciones — revisión %s\n\n%s\n' "$n" "$tasks" >>"$dir/tasks.md"
+    fi
+    ;;
+
+  final)
+    case "$final_status" in approved | incomplete) ;; *) echo '{"verdict":"ERROR","error":"status must be approved|incomplete"}'; exit 1 ;; esac
+    PREV_REVIEWS=$(ls "$dir"/reviews/code-*.json 2>/dev/null | tr '\n' ' ' || true)
+    render reviewer-final >"$tmp/prompt.md"
+    run_codex "$tmp/prompt.md" "$dir/final-report.md"
+    jq -n --arg s "$final_status" --arg r "$dir/final-report.md" '{verdict: "REPORTED", status: $s, report: $r}'
+    exit 0
+    ;;
+
+  *) echo "unknown mode: $mode" >&2; exit 2 ;;
+esac
+
+max=$([ "$mode" = plan ] && echo "$MAX_PLAN_ROUNDS" || echo "$MAX_ITER")
+jq -c --argjson max "$max" '{verdict, blocking: ([.findings[] | select(.severity != "minor")] | length),
+        minor: ([.findings[] | select(.severity == "minor")] | length),
+        unresolved_previous: ([.previous_findings[] | select(.status != "resolved")] | length),
+        round: .iteration, max_rounds: $max, final_round: (.iteration >= $max),
+        summary}' "$out"

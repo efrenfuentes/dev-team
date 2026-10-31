@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Print the team configuration as JSON, plus where a feature's plan loop would resume.
+#
+#   team-config [feature_dir]
+#   → {max_plan_rounds, max_code_reviews, planner: {model, effort}, developer: {model, effort},
+#      reviewer: {model, effort}, next_plan_round?, plan_approved?}
+set -euo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/config.sh"
+
+base=$(jq -n \
+  --argjson p "$TEAM_MAX_PLAN_ROUNDS" --argjson c "$TEAM_MAX_CODE_REVIEWS" \
+  --arg pm "$TEAM_PLANNER_MODEL" --arg pe "$TEAM_PLANNER_EFFORT" \
+  --arg dm "$TEAM_DEVELOPER_MODEL" --arg de "$TEAM_DEVELOPER_EFFORT" \
+  --arg rm "$TEAM_REVIEW_MODEL" --arg re "$TEAM_REVIEW_EFFORT" \
+  '{max_plan_rounds: $p, max_code_reviews: $c,
+    planner: {model: $pm, effort: $pe}, developer: {model: $dm, effort: $de},
+    reviewer: {model: $rm, effort: $re}}')
+
+if [ -z "${1:-}" ]; then
+  echo "$base"
+  exit 0
+fi
+
+dir=$(cd "$1" && pwd)
+done_rounds=$(find "$dir/reviews" -name 'plan-*.json' 2>/dev/null | wc -l | tr -d ' ')
+approved=false
+if [ "$done_rounds" -gt 0 ] && [ "$(jq -r '.verdict' "$dir/reviews/plan-$done_rounds.json")" = "APPROVED" ]; then
+  approved=true
+fi
+echo "$base" | jq --argjson next $((done_rounds + 1)) --argjson a $approved \
+  '. + {next_plan_round: $next, plan_approved: $a}'

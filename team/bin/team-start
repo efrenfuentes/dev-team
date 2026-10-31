@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Preflight before the dev loop. Prints JSON: {ok, feature_dir, base_sha, branch, start_iter,
+# max_iter, finished, error?}
+#
+#   team-start <feature_dir> [--reset]
+#
+# Refuses to start on a dirty tree or on main/master/develop, because the Developer commits
+# every iteration and must not sweep up unrelated work. base_sha is recorded once and kept
+# on later runs (so an interrupted loop resumes); --reset starts the loop over from HEAD.
+set -euo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/config.sh"
+max=$TEAM_MAX_CODE_REVIEWS
+
+dir=$(cd "${1:?usage: team-start <feature_dir> [--reset]}" && pwd)
+reset=${2:-}
+cd "$dir"
+repo=$(git rev-parse --show-toplevel)
+cd "$repo"
+state="$dir/state.json"
+
+fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
+
+[ -f "$state" ] || fail "missing state.json — run team-init first"
+[ -s "$dir/tasks.md" ] || fail "missing tasks.md — run /team-plan first"
+[ -s "$dir/plan.md" ] || fail "missing plan.md — run /team-plan first"
+
+branch=$(git branch --show-current)
+case "$branch" in
+  "" ) fail "detached HEAD — switch to a feature branch" ;;
+  main | master | develop ) fail "on protected branch '$branch' — create a feature branch first" ;;
+esac
+
+dirty=$(git status --porcelain --untracked-files=normal)
+[ -z "$dirty" ] || fail "working tree is not clean — commit or stash first: $(echo "$dirty" | head -5 | tr '\n' ' ')"
+
+if [ "$reset" = "--reset" ]; then
+  rm -f "$dir"/reviews/code-*.json "$dir"/gates/iter-*
+  jq '.base_sha = null' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+fi
+
+base_sha=$(jq -r '.base_sha // empty' "$state")
+if [ -z "$base_sha" ]; then
+  base_sha=$(git rev-parse HEAD)
+  jq --arg s "$base_sha" --arg b "$branch" '.base_sha = $s | .branch = $b' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+fi
+
+done_iters=$(find "$dir/reviews" -name 'code-*.json' | wc -l | tr -d ' ')
+finished=false
+if [ "$done_iters" -ge "$max" ] ||
+  { [ "$done_iters" -gt 0 ] && [ "$(jq -r '.verdict' "$dir/reviews/code-$done_iters.json")" = "APPROVED" ]; }; then
+  finished=true
+fi
+jq -n --arg d "$dir" --arg s "$base_sha" --arg b "$branch" --argjson i $((done_iters + 1)) --argjson f $finished \
+  --argjson max "$max" \
+  '{ok: true, feature_dir: $d, base_sha: $s, branch: $b, start_iter: $i, max_iter: $max, finished: $f}'

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Create a new feature workspace under <repo>/.team/NNN-<slug>/ and print its absolute path.
+#
+#   team-init <slug> [base_ref]     # base_ref defaults to origin/develop
+#
+# .team/ is added to .git/info/exclude (local only), so it never shows up in commits.
+set -euo pipefail
+
+slug=${1:?usage: team-init <slug> [base_ref]}
+base_ref=${2:-origin/develop}
+
+repo=$(git rev-parse --show-toplevel)
+exclude="$(git rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+mkdir -p "$(dirname "$exclude")"
+grep -qxF '.team/' "$exclude" 2>/dev/null || echo '.team/' >>"$exclude"
+
+mkdir -p "$repo/.team"
+n=$(find "$repo/.team" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9]-*' | wc -l | tr -d ' ')
+dir="$repo/.team/$(printf '%03d' $((n + 1)))-$slug"
+mkdir -p "$dir/reviews" "$dir/gates"
+
+jq -n --arg slug "$slug" --arg base_ref "$base_ref" --arg created "$(date -u +%FT%TZ)" \
+  '{feature: $slug, base_ref: $base_ref, created: $created, base_sha: null, branch: null}' \
+  >"$dir/state.json"
+
+echo "$dir"

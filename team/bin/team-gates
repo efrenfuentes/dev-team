@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Run the repo's automatic gates (tests + lint) for one iteration.
+#
+#   team-gates <feature_dir> <iter>
+#
+# Gate script lookup: <repo>/.team/gates.sh, then ~/.claude/team/gates/<repo-name>.sh.
+# The gate script runs from the repo root with BASE_SHA and BASE_REF exported and must exit
+# non-zero on failure. Writes gates/iter-N.log and gates/iter-N.json; prints the JSON.
+set -uo pipefail
+
+dir=$(cd "${1:?usage: team-gates <feature_dir> <iter>}" && pwd)
+iter=${2:?iter required}
+repo=$(git -C "$dir" rev-parse --show-toplevel)
+repo_name=$(basename "$(dirname "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)")")
+cd "$repo"
+
+export BASE_SHA BASE_REF
+BASE_SHA=$(jq -r '.base_sha' "$dir/state.json")
+BASE_REF=$(jq -r '.base_ref' "$dir/state.json")
+
+log="$dir/gates/iter-$iter.log"
+json="$dir/gates/iter-$iter.json"
+script=""
+for candidate in "$repo/.team/gates.sh" "$HOME/.claude/team/gates/$repo_name.sh"; do
+  [ -f "$candidate" ] && { script=$candidate; break; }
+done
+
+if [ -z "$script" ]; then
+  echo "No gate script configured for $repo_name" >"$log"
+  jq -n --arg log "$log" '{passed: true, configured: false, script: null, log: $log}' | tee "$json"
+  exit 0
+fi
+
+bash "$script" >"$log" 2>&1
+code=$?
+jq -n --argjson passed "$([ $code -eq 0 ] && echo true || echo false)" --arg script "$script" \
+  --arg log "$log" --argjson code $code \
+  '{passed: $passed, configured: true, script: $script, exit_code: $code, log: $log}' | tee "$json"
