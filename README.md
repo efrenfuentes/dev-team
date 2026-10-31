@@ -124,3 +124,7 @@ team/
   schemas/         JSON schema del veredicto del Reviewer
   gates/           scripts de gates por repo
 ```
+
+## Licencia
+
+[MIT](LICENSE) © 2026 Efrén Fuentes
