@@ -22,7 +22,7 @@ git clone <url-de-este-repo> ~/Developer/dev-team
 
 ```
 ~/.claude/agents/team-{planner,developer,runner}.md  →  agents/
-~/.claude/skills/team-plan, team-dev                 →  skills/
+~/.claude/skills/team-plan, team-dev, team-status    →  skills/
 ~/.claude/team                                       →  team/
 ```
 
@@ -54,7 +54,10 @@ En el repo del proyecto, desde una rama de feature limpia:
    `.git/info/exclude` y nunca se commitea. La base por defecto es la rama principal del remoto
    (`origin/HEAD`, o la primera de `origin/develop`, `origin/main`, `origin/master` que exista).
 2. Revisa `spec.md`, `plan.md` y `tasks.md`.
-3. **`/team-dev [NNN] [--reset]`**
+3. **`/team-status`** muestra en qué fase está cada feature del repo (planning, planned,
+   developing, approved, incomplete), con rondas, iteraciones, tareas abiertas y lo que
+   requiere a una persona.
+4. **`/team-dev [NNN] [--reset]`**
    Repite el ciclo Developer → gates → Reviewer hasta que el Reviewer aprueba, con un máximo de
    6 revisiones (la implementación inicial más 5 rondas de corrección). Al final escribe
    `final-report.md`. Nunca hace push ni abre PRs.
@@ -77,6 +80,10 @@ Por eso el Planner no escribe tareas `T…` que el Developer no pueda verificar 
 necesita a una persona va en `## Verificación manual (persona)` de `tasks.md`, sin checkbox.
 
 El transcript completo de cada llamada a Codex queda en `.team/NNN-slug/logs/`.
+
+El Planner lee las `Clarificaciones` y `Decisiones de revisión` de las features anteriores del
+mismo repo y las hereda en `## Decisiones heredadas` de la spec, así no vuelve a preguntar lo ya
+decidido. El Developer corre los gates por su cuenta antes de cada commit.
 
 ## Configuración
 
@@ -133,10 +140,10 @@ exit $status
 
 ```
 agents/            definiciones de los subagentes de Claude Code
-skills/            /team-plan y /team-dev
+skills/            /team-plan, /team-dev y /team-status
 team/
   config.sh        modelos, esfuerzos y límites
-  bin/             team-init, team-start, team-config, team-gates, team-review
+  bin/             team-init, team-start, team-config, team-gates, team-review, team-status
   plan-review.js   workflow Reviewer ↔ Planner
   dev-team.js      workflow Developer → gates → Reviewer
   prompts/         prompts del Reviewer (plan, código, seguridad, reporte final)

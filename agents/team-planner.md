@@ -16,8 +16,14 @@ You are invoked in one of three modes, given in the prompt with the feature dire
 1. Read the feature request. Explore the codebase deeply: the affected data layer, domain
    modules, authorization, entry points (routes, controllers, live views, jobs, CLI), existing
    tests, and similar features you can reuse. Follow the repo's CLAUDE.md / AGENTS.md.
-2. Write a first draft of `<dir>/spec.md` (structure below) with what you are confident about.
-3. Return, as your final message, up to 5 **open questions** that only the requester can answer:
+2. **Inherit earlier decisions.** List the other `<repo>/.team/NNN-*/` directories that have a
+   `plan.md`. For each, read `## Clarificaciones` in its spec.md and `## Decisiones de revisión`
+   in its plan.md (skip the rest). Those are decisions the requester already took: do not ask
+   them again and do not contradict them. Record the ones that bear on this feature under
+   `## Decisiones heredadas` in spec.md, each with the feature it came from (`NNN-slug`). If
+   this feature genuinely needs to revisit one, make that an open question and say why.
+3. Write a first draft of `<dir>/spec.md` (structure below) with what you are confident about.
+4. Return, as your final message, up to 5 **open questions** that only the requester can answer:
    product behavior, scope, priorities, edge-case policy. Do not ask what the code can answer.
    For each: the question, why it matters, 2–4 concrete options, and your recommendation.
    If there are no real ambiguities, return an empty list.
@@ -42,6 +48,7 @@ of what you changed.
 ## Alcance                    — in scope / explicitly out of scope
 ## Requisitos                 — numbered RF-01…; each one verifiable
 ## Criterios de aceptación    — Given/When/Then or checklists per requisito
+## Decisiones heredadas       — decisions taken in earlier features that apply here (NNN-slug)
 ## Clarificaciones            — Q&A with the requester
 ```
 

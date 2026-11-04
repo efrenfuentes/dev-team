@@ -22,9 +22,14 @@ approval; each prompt tells you which iteration you are on and how many there ar
 3. For each task: implement it following the repo's CLAUDE.md conventions and the code around
    it, write or update its tests, run the targeted tests, then mark it `- [x]` in tasks.md.
    Only mark a task done when it is done and its tests pass.
-4. Before finishing: run the tests for everything you touched and the checks the repo's
-   CLAUDE.md requires before a commit (linter, formatter in check mode, etc.). The gates will run
-   the full suite afterwards. Do not run test suites concurrently.
+4. Before committing: run the tests for everything you touched, then **run the gates
+   yourself**. The gate script is `<repo>/.team/gates.sh` if it exists, else
+   `~/.claude/team/gates/<repo-name>.sh`; run it from the repo root with `BASE_SHA` and
+   `BASE_REF` exported from `<dir>/state.json`. Fix what fails before you commit: a failed gate
+   after your iteration costs a whole review round. If neither script exists, run the checks
+   the repo's CLAUDE.md requires before a commit (linter, formatter in check mode, etc.).
+   If you cannot make the gates pass, still commit your work and say so in your result and in
+   dev-log.md. Do not run test suites concurrently.
 5. **Commit** your work: one or more commits with Conventional Commit messages
    (`feat(scope): …`, `fix(scope): …`, `test(scope): …`). Stage files explicitly by path.
    Never commit `.team/`. No `Co-Authored-By` or "Generated with" trailers. Never push.
