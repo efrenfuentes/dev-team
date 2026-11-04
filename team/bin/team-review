@@ -35,10 +35,10 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 render() { perl -pe 's/\{\{(\w+)\}\}/exists $ENV{$1} ? $ENV{$1} : "{{$1}}"/ge' "$TEAM/prompts/$1.md"; }
 
-run_codex() { # <prompt_file> <out_file> [schema]
+run_codex() { # <prompt_file> <out_file> [schema] [log_name]
   # The raw Codex transcript goes to logs/, not next to the report. developer_instructions is
   # cleared so a coordinator/delegation setup in ~/.codex/config.toml does not shape the review.
-  local schema_args=() log="$dir/logs/codex-$mode-$n.log"
+  local schema_args=() log="$dir/logs/codex-${4:-$mode}-$n.log"
   mkdir -p "$dir/logs"
   [ -n "${3:-}" ] && schema_args=(--output-schema "$3")
   codex exec -C "$repo" -m "$model" -c "model_reasoning_effort=\"$effort\"" -c 'developer_instructions=""' \
@@ -65,14 +65,24 @@ reopen_previous() { # <json>
 
 # Give findings stable ids (<prefix><n>-NN), and derive the verdict from the findings: an
 # APPROVED with an open blocker/major (new or carried over) is downgraded.
-normalize() { # <raw_json> <prefix> <out_json>
-  jq --arg p "$2" --arg n "$n" --arg head "$HEAD_SHA" '
-    .findings |= (to_entries | map(.value + {id: ($p + $n + "-" + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))}))
+normalize() { # <raw_json> <prefix> <out_json> [tag]   → ids <prefix><n>-<tag>NN
+  jq --arg p "$2" --arg n "$n" --arg tag "${4:-}" --arg head "$HEAD_SHA" '
+    .findings |= (to_entries | map(.value + {id: ($p + $n + "-" + $tag + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))}))
     | .model_verdict = .verdict
     | if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
          or ([.previous_findings[] | select(.status != "resolved")] | length) > 0
       then .verdict = "CHANGES_REQUESTED" else . end
     | . + {iteration: ($n | tonumber), head_sha: $head}' "$1" >"$3"
+}
+
+# Fold the security reviewer's findings into the general review and recompute the verdict.
+merge_security() { # <general_norm_json> <security_norm_json> <out_json>
+  jq --slurpfile sec "$2" '
+    .findings += $sec[0].findings
+    | .summary += "\n\n**Seguridad:** " + $sec[0].summary
+    | .security_verdict = $sec[0].model_verdict
+    | if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
+      then .verdict = "CHANGES_REQUESTED" else . end' "$1" >"$3"
 }
 
 report_section() { # <json> <title>
@@ -124,9 +134,31 @@ case "$mode" in
     GATES_LOG="$dir/gates/iter-$n.log"
     GATES_PASSED=$([ -f "$gates_json" ] && jq -r '.passed' "$gates_json" || echo "unknown")
 
+    # First review only: a security-focused pass runs in parallel with the general one.
+    sec_pid=""
+    if [ "$n" = 1 ] && [ "${TEAM_SECURITY_REVIEW:-1}" = 1 ]; then
+      render reviewer-security >"$tmp/prompt-sec.md"
+      ( run_codex "$tmp/prompt-sec.md" "$tmp/raw-sec.json" "$TEAM/schemas/verdict.json" security >"$tmp/sec-error.json" ) &
+      sec_pid=$!
+    fi
+
     render reviewer-code >"$tmp/prompt.md"
     run_codex "$tmp/prompt.md" "$tmp/raw.json" "$TEAM/schemas/verdict.json"
     normalize "$tmp/raw.json" R "$tmp/norm.json"
+
+    if [ -n "$sec_pid" ]; then
+      if wait "$sec_pid"; then
+        normalize "$tmp/raw-sec.json" R "$tmp/norm-sec.json" S
+        merge_security "$tmp/norm.json" "$tmp/norm-sec.json" "$tmp/merged.json" && mv "$tmp/merged.json" "$tmp/norm.json"
+      else
+        # The general review stands; record that the security pass did not run.
+        jq --arg e "$(jq -r '.error // "unknown"' "$tmp/sec-error.json" 2>/dev/null)" --arg n "$n" '
+          .findings += [{id: ("R" + $n + "-S00"), severity: "human", location: "team-review",
+            title: "La revisión de seguridad no se ejecutó", detail: ("codex: " + $e),
+            task: ("Revisar logs/codex-security-" + $n + ".log y, si procede, repetir la revisión de seguridad a mano")}]' \
+          "$tmp/norm.json" >"$tmp/merged.json" && mv "$tmp/merged.json" "$tmp/norm.json"
+      fi
+    fi
 
     # Failing gates can never be approved, whatever the model says.
     if [ "$GATES_PASSED" = "false" ]; then

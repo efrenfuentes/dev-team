@@ -8,6 +8,7 @@ cualquier repo:
 | **Planner** (`team-planner`) | Claude Opus | high | Explora el código, te hace preguntas y escribe `spec.md`, `plan.md` y `tasks.md` |
 | **Developer** (`team-developer`) | Claude Opus | medium | Hace las tareas, escribe los tests y hace commits (Conventional Commits, sin push) |
 | **Reviewer** (Codex CLI) | OpenAI `gpt-6-astra` | high | Revisa el plan y el código en modo solo lectura, y agrega tareas de corrección |
+| **Reviewer de seguridad** (Codex CLI) | OpenAI `gpt-6-astra` | high | Solo en la primera revisión de código: autorización, aislamiento por cuenta, entrada no confiable y exposición de datos. Corre en paralelo al Reviewer; sus hallazgos son `R1-SNN` |
 | **Runner** (`team-runner`) | Claude Haiku | low | Corre los gates y el reviewer, y devuelve su JSON sin interpretarlo |
 
 ## Instalación
@@ -59,7 +60,9 @@ En el repo del proyecto, desde una rama de feature limpia:
    `final-report.md`. Nunca hace push ni abre PRs.
 
 Puedes seguir el progreso en `/workflows`. Si un ciclo se corta, al correr el comando de nuevo
-retoma desde la siguiente ronda o iteración. `--reset` archiva las revisiones, reportes y
+retoma desde la siguiente ronda o iteración. Si el Developer reporta que está bloqueado y no hizo
+commits, el ciclo se detiene antes de gastar gates y revisión; resuelve el bloqueo y vuelve a
+correr `/team-dev`. `--reset` archiva las revisiones, reportes y
 dev-log anteriores en `.team/NNN-slug/archive/` y vuelve a empezar; los commits se conservan.
 
 ### Qué hace cada hallazgo del Reviewer
@@ -87,6 +90,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_REVIEW_MODEL` / `TEAM_REVIEW_EFFORT` | `gpt-6-astra` / `high` |
 | `TEAM_MAX_PLAN_ROUNDS` | `5` |
 | `TEAM_MAX_CODE_REVIEWS` | `6` |
+| `TEAM_SECURITY_REVIEW` | `1` (0 la desactiva) |
 
 Los modelos de Claude aceptan `opus`, `sonnet`, `haiku` o `fable`. Los esfuerzos aceptan
 `low`, `medium`, `high`, `xhigh` o `max`. Para ver la configuración actual:
@@ -135,7 +139,7 @@ team/
   bin/             team-init, team-start, team-config, team-gates, team-review
   plan-review.js   workflow Reviewer ↔ Planner
   dev-team.js      workflow Developer → gates → Reviewer
-  prompts/         prompts del Reviewer (plan, código, reporte final)
+  prompts/         prompts del Reviewer (plan, código, seguridad, reporte final)
   schemas/         JSON schema del veredicto del Reviewer
   gates/           scripts de gates por repo
 ```

@@ -69,6 +69,11 @@ for (let i = START; i <= MAX_ITER; i++) {
 
   const dev = await agent(devPrompt(i), { agentType: 'team-developer', model: DEVELOPER.model, effort: DEVELOPER.effort, label: `developer:${i}`, phase: `Iteración ${i}`, schema: DEV_SCHEMA })
   if (!dev) { stopReason = `el Developer falló en la iteración ${i}`; break }
+  if (dev.blocked && dev.commits.length === 0) {
+    // Nothing to review: running gates and a review would burn an iteration on the same block.
+    stopReason = `el Developer está bloqueado en la iteración ${i} y no hizo commits: ${dev.notes || 'sin detalle'}`
+    break
+  }
   log(`Iteración ${i}: Developer completó ${dev.completed_tasks.length} tareas, ${dev.pending_tasks.length} pendientes, ${dev.commits.length} commits${dev.blocked ? ' (BLOQUEADO)' : ''}${dev.needs_human?.length ? ` · requieren persona: ${dev.needs_human.join(', ')}` : ''}`)
 
   const gates = await agent(run(`${BIN}/team-gates "${DIR}" ${i}`), {

@@ -20,3 +20,8 @@ TEAM_DEVELOPER_EFFORT=${TEAM_DEVELOPER_EFFORT:-medium}
 # Reviewer runs through the Codex CLI: an OpenAI model id and Codex's model_reasoning_effort.
 TEAM_REVIEW_MODEL=${TEAM_REVIEW_MODEL:-gpt-6-astra}
 TEAM_REVIEW_EFFORT=${TEAM_REVIEW_EFFORT:-high}
+
+# Security reviewer: a second Codex pass, only on the first code review of a feature, focused on
+# authorization, tenant isolation, untrusted input and data exposure. Runs in parallel with the
+# general reviewer; its findings get ids R1-SNN. Set to 0 to disable.
+TEAM_SECURITY_REVIEW=${TEAM_SECURITY_REVIEW:-1}
