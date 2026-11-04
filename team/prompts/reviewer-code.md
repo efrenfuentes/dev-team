@@ -17,7 +17,24 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 - Cambios acumulados: `git diff {{BASE_SHA}}..{{HEAD_SHA}}` y `git log --oneline {{BASE_SHA}}..{{HEAD_SHA}}`
 - Cambios de esta iteración: `git diff {{PREV_SHA}}..{{HEAD_SHA}}`
 - Gates automáticos (tests y lint) de esta iteración: passed=`{{GATES_PASSED}}`, log en `{{GATES_LOG}}`
-- Revisiones anteriores (JSON): {{PREV_REVIEWS}}
+- Revisiones anteriores (JSON, solo como referencia): {{PREV_REVIEWS}}
+
+### Hallazgos previos aún abiertos
+
+Estos son los `blocker`/`major` de revisiones anteriores que siguen abiertos. Cada uno debe
+aparecer en `previous_findings` con su estado tras esta iteración:
+
+{{PREV_OPEN}}
+
+## Alcance de la revisión
+
+- **Iteración 1**: revisa todo el diff acumulado a fondo. Un reviewer de seguridad hace en
+  paralelo una pasada dedicada a autorización, aislamiento y entrada no confiable.
+- **Iteraciones siguientes**: revisa a fondo el diff de esta iteración y verifica uno por uno
+  los hallazgos previos abiertos. Usa el diff acumulado solo para comprobar que lo tocado en esta
+  iteración no rompe lo anterior (regresiones). No vuelvas a revisar desde cero lo que ya
+  aprobaste implícitamente en rondas anteriores: si algo no cambió y no lo reportaste entonces,
+  no lo reportes ahora salvo que sea un `blocker` claro.
 
 ## Qué revisar
 
@@ -46,6 +63,11 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 ## Reglas de convergencia (importantes)
 
 - No introduzcas criterios nuevos ajenos a la spec, el plan o las convenciones del repo.
+- Respeta `## Alcance` de la spec: lo que está marcado como fuera de alcance **no es un
+  hallazgo**, aunque te parezca necesario. Si crees que debería estar dentro, dilo en `summary`.
+- **Evidencia primero.** Empieza cada `detail` con lo que viste (la línea, la consulta, la
+  ruta, el test que falta), y después la interpretación. Un hallazgo sin evidencia concreta en
+  el código no se reporta.
 - En `previous_findings` incluye **solo** los hallazgos `blocker`/`major` de revisiones
   anteriores, cada uno con su estado: `resolved`, `unresolved` o `regressed`.
 - Si uno previo sigue `unresolved` o `regressed`, **no lo repitas en `findings`**: su tarea se

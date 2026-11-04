@@ -17,7 +17,7 @@ Markdown, sin preámbulo) se guardará tal cual como `final-report.md`.
 ```
 # Informe final — <nombre de la feature>
 
-**Estado:** ✅ Aprobado | ⚠️ Incompleto · **Iteraciones:** N/6 · **Rama:** … · **Commits:** base..head
+**Estado:** ✅ Aprobado | ⚠️ Incompleto · **Iteraciones:** N/{{MAX_ITER}} · **Rama:** … · **Commits:** base..head
 
 ## Resumen
 2–4 frases: qué se pidió y en qué estado queda.

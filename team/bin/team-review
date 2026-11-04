@@ -28,7 +28,7 @@ effort=$TEAM_REVIEW_EFFORT
 
 export FEATURE_DIR="$dir" ITER="$n" FINAL_STATUS="$final_status"
 export MAX_ITER="$TEAM_MAX_CODE_REVIEWS" MAX_PLAN_ROUNDS="$TEAM_MAX_PLAN_ROUNDS"
-export BASE_SHA BASE_REF HEAD_SHA PREV_SHA GATES_LOG GATES_PASSED PREV_REVIEWS
+export BASE_SHA BASE_REF HEAD_SHA PREV_SHA GATES_LOG GATES_PASSED PREV_REVIEWS PREV_OPEN
 BASE_SHA=$(jq -r '.base_sha // empty' "$dir/state.json")
 BASE_REF=$(jq -r '.base_ref' "$dir/state.json")
 HEAD_SHA=$(git rev-parse HEAD)
@@ -61,6 +61,19 @@ reopen_previous() { # <json>
           s/\n$/ · reabierta en revisión $ENV{N}: $ENV{NOTE}\n/;
         }' "$dir/tasks.md"
     done
+}
+
+# Render the blocker/major findings from earlier reviews that are still open (never judged, or
+# last judged unresolved/regressed) as a compact list for the prompt, so the reviewer does not
+# have to open every JSON. Files are read in iteration order.
+open_findings() { # <json files in order...>
+  [ $# -gt 0 ] || { echo "_Ninguno._"; return; }
+  jq -s -r '
+    (map(.previous_findings[]?) | group_by(.id) | map({key: .[0].id, value: (last.status)}) | from_entries) as $st
+    | [ .[] | .findings[]? | select(.severity == "blocker" or .severity == "major") ]
+    | map(select(($st[.id] // "open") != "resolved"))
+    | if length == 0 then "_Ninguno: todo lo anterior está resuelto._"
+      else map("- **\(.id)** [\(.severity)] \(.title) — `\(.location)` · Tarea: \(.task)") | join("\n") end' "$@"
 }
 
 # Give findings stable ids (<prefix><n>-NN), and derive the verdict from the findings: an
@@ -115,7 +128,10 @@ case "$mode" in
   plan)
     [ "$n" -le "$MAX_PLAN_ROUNDS" ] || over_limit "$MAX_PLAN_ROUNDS"
     out="$dir/reviews/plan-$n.json"
-    PREV_REVIEWS=$(ls "$dir"/reviews/plan-*.json 2>/dev/null | grep -v "plan-$n.json" | tr '\n' ' ' || true)
+    prev_files=$(ls "$dir"/reviews/plan-*.json 2>/dev/null | grep -v "plan-$n.json" | sort -V || true)
+    PREV_REVIEWS=$(echo "$prev_files" | tr '\n' ' ')
+    # shellcheck disable=SC2086
+    PREV_OPEN=$(open_findings $prev_files)
     render reviewer-plan >"$tmp/prompt.md"
     run_codex "$tmp/prompt.md" "$tmp/raw.json" "$TEAM/schemas/verdict.json"
     normalize "$tmp/raw.json" P "$out"
@@ -129,7 +145,10 @@ case "$mode" in
     out="$dir/reviews/code-$n.json"
     prev="$dir/reviews/code-$((n - 1)).json"
     PREV_SHA=$([ -f "$prev" ] && jq -r '.head_sha' "$prev" || echo "$BASE_SHA")
-    PREV_REVIEWS=$(ls "$dir"/reviews/code-*.json 2>/dev/null | grep -v "code-$n.json" | tr '\n' ' ' || true)
+    prev_files=$(ls "$dir"/reviews/code-*.json 2>/dev/null | grep -v "code-$n.json" | sort -V || true)
+    PREV_REVIEWS=$(echo "$prev_files" | tr '\n' ' ')
+    # shellcheck disable=SC2086
+    PREV_OPEN=$(open_findings $prev_files)
     gates_json="$dir/gates/iter-$n.json"
     GATES_LOG="$dir/gates/iter-$n.log"
     GATES_PASSED=$([ -f "$gates_json" ] && jq -r '.passed' "$gates_json" || echo "unknown")

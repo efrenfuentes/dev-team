@@ -47,6 +47,10 @@ seguridad: eso lo hace el otro reviewer.
   infraestructura). No bloquea; `task` dice qué debe hacer la persona.
 - **Sé exhaustivo por hallazgo**: enumera en el mismo `detail` y la misma `task` todas las
   consultas, rutas o clases de entrada afectadas, para que se corrija de una vez.
+- Respeta `## Alcance` de la spec: lo que está fuera de alcance no es un hallazgo. Si crees
+  que debería estar dentro, dilo en `summary`.
+- Evidencia primero: cada `detail` empieza con lo que viste (la consulta, la ruta, la línea) y
+  después la interpretación. Sin evidencia concreta no hay hallazgo.
 - Cada `blocker`/`major` necesita una `task` accionable y verificable: qué cambiar y dónde. Para
   los `minor`, `task` vacío.
 - `location`: `ruta/archivo:línea` cuando aplique, o la ruta o el área si es general.

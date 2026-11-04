@@ -10,7 +10,13 @@ que necesites para validar el plan contra el código real.
 - Carpeta de la feature: `{{FEATURE_DIR}}`: `spec.md`, `plan.md`, `tasks.md`
 - Ronda de revisión del plan: **{{ITER}} de {{MAX_PLAN_ROUNDS}}**
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz
-- Revisiones anteriores del plan (JSON): {{PREV_REVIEWS}}
+- Revisiones anteriores del plan (JSON, solo como referencia): {{PREV_REVIEWS}}
+
+### Hallazgos previos aún abiertos
+
+Cada uno debe aparecer en `previous_findings` con su estado tras la revisión del Planner:
+
+{{PREV_OPEN}}
 
 ## Qué revisar
 
@@ -40,6 +46,10 @@ que necesites para validar el plan contra el código real.
 - Sé exhaustivo por hallazgo: enumera todos los casos o huecos del mismo problema de una vez, no
   una variante por ronda.
 - `APPROVED` solo si no queda ningún `blocker`/`major` abierto.
+- Respeta `## Alcance` de la spec: lo que está fuera de alcance no es un hallazgo. Si crees
+  que debería estar dentro, dilo en `summary`.
+- Evidencia primero: cada `detail` empieza con lo que viste en el código o en el documento
+  (archivo, sección, patrón existente) y después la interpretación.
 - Cada `blocker`/`major` necesita una `task`: qué cambiar en spec, plan o tareas. Para los
   `minor` deja `task` vacío. `location`: archivo y sección (por ejemplo, `plan.md#Migraciones`).
 - Escribe en español, conciso.
