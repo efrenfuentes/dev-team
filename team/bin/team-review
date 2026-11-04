@@ -36,14 +36,31 @@ HEAD_SHA=$(git rev-parse HEAD)
 render() { perl -pe 's/\{\{(\w+)\}\}/exists $ENV{$1} ? $ENV{$1} : "{{$1}}"/ge' "$TEAM/prompts/$1.md"; }
 
 run_codex() { # <prompt_file> <out_file> [schema]
-  local schema_args=()
+  # The raw Codex transcript goes to logs/, not next to the report. developer_instructions is
+  # cleared so a coordinator/delegation setup in ~/.codex/config.toml does not shape the review.
+  local schema_args=() log="$dir/logs/codex-$mode-$n.log"
+  mkdir -p "$dir/logs"
   [ -n "${3:-}" ] && schema_args=(--output-schema "$3")
-  codex exec -C "$repo" -m "$model" -c "model_reasoning_effort=\"$effort\"" \
-    -s read-only --color never ${schema_args[@]+"${schema_args[@]}"} -o "$2" - <"$1" >"$2.log" 2>&1 || {
-    jq -n --arg log "$2.log" '{verdict: "ERROR", error: "codex exec failed", log: $log}'
+  codex exec -C "$repo" -m "$model" -c "model_reasoning_effort=\"$effort\"" -c 'developer_instructions=""' \
+    -s read-only --color never ${schema_args[@]+"${schema_args[@]}"} -o "$2" - <"$1" >"$log" 2>&1 || {
+    jq -n --arg log "$log" '{verdict: "ERROR", error: "codex exec failed", log: $log}'
     exit 1
   }
-  [ -s "$2" ] || { jq -n --arg log "$2.log" '{verdict: "ERROR", error: "empty codex output", log: $log}'; exit 1; }
+  [ -s "$2" ] || { jq -n --arg log "$log" '{verdict: "ERROR", error: "empty codex output", log: $log}'; exit 1; }
+}
+
+# Reopen the tasks of previous findings the reviewer still sees as unresolved/regressed, instead
+# of appending a duplicate task with a new id every round.
+reopen_previous() { # <json>
+  local id note
+  jq -r '.previous_findings[] | select(.status != "resolved") | "\(.id)\t\(.note)"' "$1" |
+    while IFS=$'\t' read -r id note; do
+      ID="$id" NOTE="$note" N="$n" perl -pi -e '
+        if (/^- \[[ x]\] \Q$ENV{ID}\E / && !/· reabierta en revisión \Q$ENV{N}\E:/) {
+          s/^- \[x\] /- [ ] /;
+          s/\n$/ · reabierta en revisión $ENV{N}: $ENV{NOTE}\n/;
+        }' "$dir/tasks.md"
+    done
 }
 
 # Give findings stable ids (<prefix><n>-NN), and derive the verdict from the findings: an
@@ -52,7 +69,7 @@ normalize() { # <raw_json> <prefix> <out_json>
   jq --arg p "$2" --arg n "$n" --arg head "$HEAD_SHA" '
     .findings |= (to_entries | map(.value + {id: ($p + $n + "-" + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))}))
     | .model_verdict = .verdict
-    | if ([.findings[] | select(.severity != "minor")] | length) > 0
+    | if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
          or ([.previous_findings[] | select(.status != "resolved")] | length) > 0
       then .verdict = "CHANGES_REQUESTED" else . end
     | . + {iteration: ($n | tonumber), head_sha: $head}' "$1" >"$3"
@@ -68,8 +85,12 @@ report_section() { # <json> <title>
     + (if (.findings | length) > 0 then
         "\n### Hallazgos\n\n"
         + (.findings | map("- **\(.id)** `\(.severity)` \(.title) — `\(.location)`\n  \(.detail)"
-            + (if .severity != "minor" then "\n  → Tarea: \(.task)" else "" end)) | join("\n")) + "\n"
-       else "\n_Sin hallazgos nuevos._\n" end)' "$1"
+            + (if (.severity == "blocker" or .severity == "major") then "\n  → Tarea: \(.task)" else "" end)) | join("\n")) + "\n"
+       else "\n_Sin hallazgos nuevos._\n" end)
+    + (if ([.findings[] | select(.severity == "human")] | length) > 0 then
+        "\n### Requiere a una persona\n\n"
+        + ([.findings[] | select(.severity == "human")] | map("- **\(.id)** \(.title): \(.task)") | join("\n")) + "\n"
+       else "" end)' "$1"
 }
 
 tmp=$(mktemp -d)
@@ -121,10 +142,11 @@ case "$mode" in
     [ -f "$dir/review-report.md" ] || printf '# Reporte de revisión\n\nReviewer: %s · Base: `%s`\n\n' "$model" "$BASE_SHA" >"$dir/review-report.md"
     { report_section "$out" "Iteración $n/$MAX_ITER · \`$(git rev-parse --short HEAD)\` · gates: $GATES_PASSED"; echo; } >>"$dir/review-report.md"
 
-    tasks=$(jq -r '.findings | map(select(.severity != "minor")) | map("- [ ] \(.id) [\(.severity)] \(.task) (`\(.location)`)") | join("\n")' "$out")
+    tasks=$(jq -r '.findings | map(select(.severity == "blocker" or .severity == "major")) | map("- [ ] \(.id) [\(.severity)] \(.task) (`\(.location)`)") | join("\n")' "$out")
     if [ -n "$tasks" ]; then
       printf '\n## Correcciones — revisión %s\n\n%s\n' "$n" "$tasks" >>"$dir/tasks.md"
     fi
+    reopen_previous "$out"
     ;;
 
   final)
@@ -140,7 +162,8 @@ case "$mode" in
 esac
 
 max=$([ "$mode" = plan ] && echo "$MAX_PLAN_ROUNDS" || echo "$MAX_ITER")
-jq -c --argjson max "$max" '{verdict, blocking: ([.findings[] | select(.severity != "minor")] | length),
+jq -c --argjson max "$max" '{verdict, blocking: ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length),
+        human: ([.findings[] | select(.severity == "human")] | length),
         minor: ([.findings[] | select(.severity == "minor")] | length),
         unresolved_previous: ([.previous_findings[] | select(.status != "resolved")] | length),
         round: .iteration, max_rounds: $max, final_round: (.iteration >= $max),

@@ -25,8 +25,8 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
    tareas marcadas `[x]` que en realidad no están hechas o están a medias?
 2. **Correctitud.** Bugs, casos borde, condiciones de carrera, manejo de errores, nulls, datos
    existentes y migraciones.
-3. **Seguridad y autorización.** Políticas, scoping de datos por tenant/comunidad, inyección,
-   exposición de datos.
+3. **Seguridad y autorización.** Políticas, scoping de datos por tenant, inyección, exposición
+   de datos.
 4. **Tests.** ¿Los tests cubren el comportamiento nuevo y los casos borde, o solo el happy path?
    ¿Las convenciones del repo exigen tests que faltan (por ejemplo, e2e)?
 5. **Convenciones del repo y consistencia** con el código que lo rodea.
@@ -38,19 +38,27 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 - `major`: problema real que debe corregirse antes de dar la feature por terminada (caso borde
   sin manejar, diseño que contradice el plan sin justificación, deuda clara introducida).
 - `minor`: estilo, nombres, mejoras opcionales. **No bloquean** y no generan tareas.
+- `human`: algo que **solo una persona puede hacer** (prueba manual con un cliente real, abrir o
+  anotar la PR, configurar un entorno externo, decidir producto). **No bloquea** la aprobación ni
+  genera tareas al Developer; va al informe para que la persona lo haga. Si una tarea de
+  tasks.md pide eso, no la cuentes como tarea pendiente del Developer: repórtala como `human`.
 
 ## Reglas de convergencia (importantes)
 
 - No introduzcas criterios nuevos ajenos a la spec, el plan o las convenciones del repo.
 - En `previous_findings` incluye **solo** los hallazgos `blocker`/`major` de revisiones
   anteriores, cada uno con su estado: `resolved`, `unresolved` o `regressed`.
-- Si uno previo sigue `unresolved` o `regressed`, **repórtalo también en `findings`**, con una
-  `task` actualizada, para que vuelva a la lista de tareas del Developer.
+- Si uno previo sigue `unresolved` o `regressed`, **no lo repitas en `findings`**: su tarea se
+  reabre sola en tasks.md con tu `note`. Pon en `note` qué falta exactamente para resolverlo.
 - No dupliques hallazgos: un mismo problema es un solo finding.
+- **Sé exhaustivo por hallazgo.** Si el problema es de validación de entrada o de casos borde,
+  enumera en el mismo `detail` y la misma `task` **todas** las clases de entrada o situaciones
+  que deben manejarse (vacío, nulo, demasiado largo, caracteres especiales, concurrencia, etc.),
+  para que se corrija de una vez. No guardes variantes del mismo problema para la próxima ronda.
 - `APPROVED` solo si no queda ningún `blocker`/`major` abierto, nuevo ni previo.
 - Cada `blocker`/`major` necesita una `task` accionable: qué cambiar y dónde, verificable. Para
-  los `minor` deja `task` como cadena vacía.
-- `location`: `ruta/archivo.rb:línea` cuando aplique, o la ruta o el área si es general.
+  los `minor` deja `task` como cadena vacía; para los `human`, `task` es lo que debe hacer la persona.
+- `location`: `ruta/archivo:línea` cuando aplique, o la ruta o el área si es general.
 - Escribe `summary`, `title`, `detail` y `task` en español, concisos.
 
 Responde únicamente con el JSON del schema.

@@ -34,6 +34,10 @@ Qué cubren los tests añadidos y el estado de los gates. Huecos de cobertura co
 ## Decisiones y desviaciones del plan
 Lo que se hizo distinto del plan y si estuvo justificado.
 
+## Pendiente para una persona
+Los hallazgos `human` de las revisiones y la sección `## Verificación manual (persona)` de
+tasks.md: qué debe hacer el requester antes de fusionar (pruebas manuales, PR, entornos).
+
 ## Hallazgos menores no atendidos
 Lista de los `minor` que siguen vigentes (opcional resolverlos).
 ```

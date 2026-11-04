@@ -25,7 +25,7 @@
         "additionalProperties": false,
         "required": ["severity", "location", "title", "detail", "task"],
         "properties": {
-          "severity": { "type": "string", "enum": ["blocker", "major", "minor"] },
+          "severity": { "type": "string", "enum": ["blocker", "major", "minor", "human"] },
           "location": { "type": "string" },
           "title": { "type": "string" },
           "detail": { "type": "string" },

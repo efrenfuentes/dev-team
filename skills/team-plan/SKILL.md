@@ -1,7 +1,7 @@
 ---
 name: team-plan
 description: Start a feature with the dev team — Planner (Opus) explores, asks the user clarifying questions, writes spec/plan/tasks, and the Reviewer (Astra 6 via Codex) reviews the plan. Use when the user runs /team-plan or asks the team to plan a feature.
-argument-hint: <feature description> [--base origin/develop]
+argument-hint: <feature description> [--base origin/main]
 ---
 
 # /team-plan — plan a feature with the dev team
@@ -23,8 +23,8 @@ explicitly asked for these settings.
    and go straight to step 5.
 
 1. **Workspace.** Pick a short kebab-case slug from the request. Run
-   `~/.claude/team/bin/team-init <slug> [base_ref]` (base defaults to `origin/develop`; pass
-   `--base` from the arguments if given). Call the printed absolute path `DIR`.
+   `~/.claude/team/bin/team-init <slug> [base_ref]` (base defaults to the remote's default
+   branch; pass `--base` from the arguments if given). Call the printed absolute path `DIR`.
 
 2. **Discover.** Spawn the `team-planner` agent: mode `discover`, the feature directory `DIR`,
    and the full feature request verbatim. It drafts `spec.md` and returns open questions.
@@ -46,8 +46,9 @@ explicitly asked for these settings.
    `/team-plan` again on the same feature resumes at the next round.
 
 6. **Hand off to the user.** Summarize in a few lines: the requirements, the number of
-   tasks per phase, the plan-review outcome and any open findings, plus the paths to `spec.md`,
-   `plan.md`, `tasks.md` and `plan-review.md`. Ask them to review the plan, then start
+   tasks per phase, the plan-review outcome and any open findings, the items under
+   `## Verificación manual (persona)` in tasks.md (things only the user can do), plus the paths
+   to `spec.md`, `plan.md`, `tasks.md` and `plan-review.md`. Ask them to review the plan, then start
    development with `/team-dev` (from a clean feature branch).
 
 Do not write code or start the dev loop from this skill.

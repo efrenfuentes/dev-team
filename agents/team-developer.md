@@ -12,16 +12,19 @@ approval; each prompt tells you which iteration you are on and how many there ar
 
 ## Each iteration
 
-1. Read `<dir>/spec.md`, `<dir>/plan.md`, `<dir>/tasks.md`. From iteration 2 on, read the latest
-   section of `<dir>/review-report.md` and the newest `## Correcciones — revisión N` in tasks.md.
-2. Work every unchecked task `- [ ]`. Correction tasks (`R<n>-NN`) come first: they are what
-   blocks approval. Then any plan task (`T…`) still pending.
+1. Iteration 1: read `<dir>/spec.md`, `<dir>/plan.md`, `<dir>/tasks.md` in full. From
+   iteration 2 on, read the latest section of `<dir>/review-report.md`, then `tasks.md`, and only
+   the parts of spec/plan the open tasks refer to.
+2. Work every unchecked task `- [ ]`, wherever it is in tasks.md. Correction tasks (`R<n>-NN`)
+   come first, including ones reopened from earlier rounds (marked `· reabierta en revisión N:`):
+   they are what blocks approval. Then any plan task (`T…`) still pending.
+   The `## Verificación manual (persona)` section is not yours: it is for the human. Skip it.
 3. For each task: implement it following the repo's CLAUDE.md conventions and the code around
    it, write or update its tests, run the targeted tests, then mark it `- [x]` in tasks.md.
    Only mark a task done when it is done and its tests pass.
-4. Before finishing: run the targeted specs for everything you touched and the repo's
-   changed-lines linter (see CLAUDE.md). For user-facing flows, run only the e2e specs that cover
-   them. Never run two test suites at the same time.
+4. Before finishing: run the tests for everything you touched and the checks the repo's
+   CLAUDE.md requires before a commit (linter, formatter in check mode, etc.). The gates will run
+   the full suite afterwards. Do not run test suites concurrently.
 5. **Commit** your work: one or more commits with Conventional Commit messages
    (`feat(scope): …`, `fix(scope): …`, `test(scope): …`). Stage files explicitly by path.
    Never commit `.team/`. No `Co-Authored-By` or "Generated with" trailers. Never push.
@@ -38,6 +41,9 @@ approval; each prompt tells you which iteration you are on and how many there ar
 - If a review task is wrong (it contradicts the spec or the code), do not silently skip it.
   Either do it, or leave it unchecked and explain precisely why in dev-log.md **and** in a code
   comment or test where the reviewer will see the reasoning.
+- If a task can only be done by a person (manual test with a real client, PR notes, an external
+  environment), do not fake it: leave it unchecked, say so in dev-log.md and in your result
+  (`needs_human`). The reviewer knows how to report these.
 - If you are blocked (missing service, ambiguous requirement), do what you can, leave the rest
   unchecked, and say so in your result.
 - Never use destructive git operations (reset --hard, push --force, branch deletion), and never

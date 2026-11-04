@@ -50,7 +50,8 @@ En el repo del proyecto, desde una rama de feature limpia:
 1. **`/team-plan <descripción de la feature> [--base origin/main]`**
    El Planner explora y te hace preguntas. Luego escribe spec, plan y tareas, y el Reviewer
    revisa el plan en hasta 5 rondas. Todo queda en `.team/NNN-slug/`, que se agrega a
-   `.git/info/exclude` y nunca se commitea. La base por defecto es `origin/develop`.
+   `.git/info/exclude` y nunca se commitea. La base por defecto es la rama principal del remoto
+   (`origin/HEAD`, o la primera de `origin/develop`, `origin/main`, `origin/master` que exista).
 2. Revisa `spec.md`, `plan.md` y `tasks.md`.
 3. **`/team-dev [NNN] [--reset]`**
    Repite el ciclo Developer → gates → Reviewer hasta que el Reviewer aprueba, con un máximo de
@@ -58,7 +59,21 @@ En el repo del proyecto, desde una rama de feature limpia:
    `final-report.md`. Nunca hace push ni abre PRs.
 
 Puedes seguir el progreso en `/workflows`. Si un ciclo se corta, al correr el comando de nuevo
-retoma desde la siguiente ronda o iteración.
+retoma desde la siguiente ronda o iteración. `--reset` archiva las revisiones, reportes y
+dev-log anteriores en `.team/NNN-slug/archive/` y vuelve a empezar; los commits se conservan.
+
+### Qué hace cada hallazgo del Reviewer
+
+| Severidad | Bloquea | Qué pasa |
+|---|---|---|
+| `blocker` / `major` | sí | Genera una tarea `R<n>-NN` en `tasks.md`. Si en la siguiente revisión sigue abierta, se **reabre la misma tarea** con la nota del Reviewer; no se crea otra. |
+| `minor` | no | Solo aparece en el reporte. |
+| `human` | no | Algo que solo una persona puede hacer (prueba manual con un cliente real, anotar la PR, un entorno externo). Va al reporte y al informe final, no al Developer. |
+
+Por eso el Planner no escribe tareas `T…` que el Developer no pueda verificar solo: lo que
+necesita a una persona va en `## Verificación manual (persona)` de `tasks.md`, sin checkbox.
+
+El transcript completo de cada llamada a Codex queda en `.team/NNN-slug/logs/`.
 
 ## Configuración
 

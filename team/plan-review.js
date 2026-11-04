@@ -21,6 +21,7 @@ const REVIEW_SCHEMA = {
   properties: {
     verdict: { type: 'string', enum: ['APPROVED', 'CHANGES_REQUESTED', 'ERROR'] },
     blocking: { type: 'integer' },
+    human: { type: 'integer' },
     minor: { type: 'integer' },
     summary: { type: 'string' },
     error: { type: 'string' },

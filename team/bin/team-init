@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # Create a new feature workspace under <repo>/.team/NNN-<slug>/ and print its absolute path.
 #
-#   team-init <slug> [base_ref]     # base_ref defaults to origin/develop
+#   team-init <slug> [base_ref]
 #
+# base_ref defaults to the remote's default branch (origin/HEAD), then the first of
+# origin/develop, origin/main, origin/master that exists.
 # .team/ is added to .git/info/exclude (local only), so it never shows up in commits.
 set -euo pipefail
 
 slug=${1:?usage: team-init <slug> [base_ref]}
-base_ref=${2:-origin/develop}
+base_ref=${2:-}
 
 repo=$(git rev-parse --show-toplevel)
+
+if [ -z "$base_ref" ]; then
+  base_ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [ -z "$base_ref" ]; then
+    for candidate in origin/develop origin/main origin/master; do
+      git rev-parse --verify -q "$candidate" >/dev/null 2>&1 && { base_ref=$candidate; break; }
+    done
+  fi
+  [ -n "$base_ref" ] || { echo "cannot detect a base branch; pass it: team-init $slug <base_ref>" >&2; exit 1; }
+fi
 exclude="$(git rev-parse --path-format=absolute --git-common-dir)/info/exclude"
 mkdir -p "$(dirname "$exclude")"
 grep -qxF '.team/' "$exclude" 2>/dev/null || echo '.team/' >>"$exclude"

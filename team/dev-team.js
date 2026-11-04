@@ -24,6 +24,7 @@ const DEV_SCHEMA = {
     pending_tasks: { type: 'array', items: { type: 'string' } },
     commits: { type: 'array', items: { type: 'string' } },
     blocked: { type: 'boolean' },
+    needs_human: { type: 'array', items: { type: 'string' } },
     notes: { type: 'string' },
   },
   required: ['completed_tasks', 'pending_tasks', 'commits', 'blocked', 'notes'],
@@ -38,6 +39,7 @@ const REVIEW_SCHEMA = {
   properties: {
     verdict: { type: 'string', enum: ['APPROVED', 'CHANGES_REQUESTED', 'REPORTED', 'ERROR'] },
     blocking: { type: 'integer' },
+    human: { type: 'integer' },
     minor: { type: 'integer' },
     unresolved_previous: { type: 'integer' },
     summary: { type: 'string' },
@@ -53,10 +55,10 @@ Iteration ${i} of ${MAX_ITER}${i === MAX_ITER ? ' — the LAST one; the reviewer
 
 ${i === 1
     ? 'Implement the plan: work the unchecked tasks in tasks.md in order.'
-    : `The reviewer requested changes. Start with the correction tasks under the newest "## Correcciones — revisión ${i - 1}" in tasks.md (read the matching section of review-report.md for the details), then any other unchecked task.`}
+    : `The reviewer requested changes. Start with every unchecked R-task in tasks.md: the ones under the newest "## Correcciones — revisión ${i - 1}" and any earlier one marked "reabierta en revisión ${i - 1}" (read the matching section of review-report.md for the details). Then any other unchecked task.`}
 
 Follow your iteration procedure: implement, test, mark [x], commit, append to dev-log.md.
-Return the task ids you completed, the ones still pending, and your commit SHAs.`
+Return the task ids you completed, the ones still pending, the ones only a person can do (needs_human), and your commit SHAs.`
 
 let approved = false
 let last = START - 1
@@ -67,7 +69,7 @@ for (let i = START; i <= MAX_ITER; i++) {
 
   const dev = await agent(devPrompt(i), { agentType: 'team-developer', model: DEVELOPER.model, effort: DEVELOPER.effort, label: `developer:${i}`, phase: `Iteración ${i}`, schema: DEV_SCHEMA })
   if (!dev) { stopReason = `el Developer falló en la iteración ${i}`; break }
-  log(`Iteración ${i}: Developer completó ${dev.completed_tasks.length} tareas, ${dev.pending_tasks.length} pendientes, ${dev.commits.length} commits${dev.blocked ? ' (BLOQUEADO)' : ''}`)
+  log(`Iteración ${i}: Developer completó ${dev.completed_tasks.length} tareas, ${dev.pending_tasks.length} pendientes, ${dev.commits.length} commits${dev.blocked ? ' (BLOQUEADO)' : ''}${dev.needs_human?.length ? ` · requieren persona: ${dev.needs_human.join(', ')}` : ''}`)
 
   const gates = await agent(run(`${BIN}/team-gates "${DIR}" ${i}`), {
     agentType: 'team-runner', model: 'haiku', effort: 'low', label: `gates:${i}`, phase: `Iteración ${i}`, schema: GATES_SCHEMA,
@@ -79,7 +81,7 @@ for (let i = START; i <= MAX_ITER; i++) {
   })
   last = i
   if (!review || review.verdict === 'ERROR') { stopReason = `el Reviewer falló en la iteración ${i}: ${review?.error || 'sin respuesta'}`; break }
-  log(`Iteración ${i}: Reviewer → ${review.verdict} (${review.blocking ?? '?'} bloqueantes/major, ${review.minor ?? '?'} menores)`)
+  log(`Iteración ${i}: Reviewer → ${review.verdict} (${review.blocking ?? '?'} bloqueantes/major, ${review.minor ?? '?'} menores${review.human ? `, ${review.human} para una persona` : ''})`)
 
   if (review.verdict === 'APPROVED') { approved = true; break }
 }

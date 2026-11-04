@@ -21,8 +21,12 @@ que necesites para validar el plan contra el código real.
 3. **Riesgos**: migraciones y datos existentes, autorización, compatibilidad de API,
    rendimiento (N+1), concurrencia y despliegue.
 4. **Tareas**: ¿cubren todo el plan? ¿Son pequeñas, ordenadas por dependencia y verificables?
-   ¿Incluyen los tests que exigen las convenciones del repo (unitarios/request y e2e) y otras
-   obligaciones (por ejemplo, regenerar docs de API)?
+   ¿Incluyen los tests que exigen las convenciones del repo y otras obligaciones (por ejemplo,
+   regenerar docs de API)?
+5. **Tareas que el Developer no puede hacer.** El Developer es un agente sin acceso a la PR, a
+   entornos externos ni a clientes reales. Cualquier verificación manual debe estar en la sección
+   `## Verificación manual (persona)` de tasks.md, **sin** checkbox, y no como tarea `T…`. Si una
+   tarea `T…` requiere a una persona, repórtalo como `major` con la tarea de moverla.
 
 ## Severidades y reglas
 
@@ -30,8 +34,11 @@ que necesites para validar el plan contra el código real.
 - `major`: hueco importante (tarea faltante, riesgo no tratado, ambigüedad que el Developer
   tendría que adivinar).
 - `minor`: mejoras opcionales; no bloquean.
+- `human`: decisión o acción que solo el requester puede tomar; no bloquea, va al informe.
 - En `previous_findings` incluye solo los `blocker`/`major` de rondas anteriores, con su estado.
-  Si siguen abiertos, repórtalos también en `findings`.
+  Si uno sigue abierto, **no lo repitas en `findings`**: di en `note` qué falta exactamente.
+- Sé exhaustivo por hallazgo: enumera todos los casos o huecos del mismo problema de una vez, no
+  una variante por ronda.
 - `APPROVED` solo si no queda ningún `blocker`/`major` abierto.
 - Cada `blocker`/`major` necesita una `task`: qué cambiar en spec, plan o tareas. Para los
   `minor` deja `task` vacío. `location`: archivo y sección (por ejemplo, `plan.md#Migraciones`).

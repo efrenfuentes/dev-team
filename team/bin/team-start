@@ -6,7 +6,10 @@
 #
 # Refuses to start on a dirty tree or on main/master/develop, because the Developer commits
 # every iteration and must not sweep up unrelated work. base_sha is recorded once and kept
-# on later runs (so an interrupted loop resumes); --reset starts the loop over from HEAD.
+# on later runs (so an interrupted loop resumes), including with --reset: the reviewer must
+# keep seeing the whole feature, not just what comes after the reset. It is the merge-base
+# of HEAD and base_ref (so commits already on the branch are reviewed too), or HEAD when
+# base_ref can't be resolved. --reset only restarts the iteration count.
 set -euo pipefail
 
 # shellcheck source=/dev/null
@@ -35,14 +38,28 @@ esac
 dirty=$(git status --porcelain --untracked-files=normal)
 [ -z "$dirty" ] || fail "working tree is not clean — commit or stash first: $(echo "$dirty" | head -5 | tr '\n' ' ')"
 
+# --reset archives the previous loop's outputs (reviews, gates, logs, reports, dev-log) under
+# archive/reset-<timestamp>/ and strips the reviewer's correction sections from tasks.md, so the
+# new Iteración 1 does not mix with the old one. Plan artifacts and the code stay as they are.
 if [ "$reset" = "--reset" ]; then
-  rm -f "$dir"/reviews/code-*.json "$dir"/gates/iter-*
-  jq '.base_sha = null' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+  arch="$dir/archive/reset-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$arch"
+  for f in reviews/code-*.json gates/iter-* logs/codex-code-* logs/codex-final-* review-report.md dev-log.md final-report.md; do
+    for path in "$dir"/$f; do
+      [ -e "$path" ] || continue
+      mkdir -p "$arch/$(dirname "$f")"
+      mv "$path" "$arch/$(dirname "$f")/"
+    done
+  done
+  perl -0pi -e 's/\n*## Correcciones — revisión \d+.*\z/\n/s' "$dir/tasks.md"
 fi
 
 base_sha=$(jq -r '.base_sha // empty' "$state")
 if [ -z "$base_sha" ]; then
-  base_sha=$(git rev-parse HEAD)
+  base_ref=$(jq -r '.base_ref // empty' "$state")
+  base_sha=""
+  [ -n "$base_ref" ] && base_sha=$(git merge-base HEAD "$base_ref" 2>/dev/null || true)
+  [ -n "$base_sha" ] || base_sha=$(git rev-parse HEAD)
   jq --arg s "$base_sha" --arg b "$branch" '.base_sha = $s | .branch = $b' "$state" >"$state.tmp" && mv "$state.tmp" "$state"
 fi
 
