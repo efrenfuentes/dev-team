@@ -25,3 +25,20 @@ TEAM_REVIEW_EFFORT=${TEAM_REVIEW_EFFORT:-high}
 # authorization, tenant isolation, untrusted input and data exposure. Runs in parallel with the
 # general reviewer; its findings get ids R1-SNN. Set to 0 to disable.
 TEAM_SECURITY_REVIEW=${TEAM_SECURITY_REVIEW:-1}
+
+# One git worktree per feature, so several features can be planned and developed at once.
+# /team-plan creates it at TEAM_WORKTREE_ROOT/NNN-slug (default: ../<repo>.worktrees/ next to
+# the main checkout) on a new branch TEAM_BRANCH_PREFIX<slug> cut from the base. Set
+# TEAM_WORKTREES=0 to work in the current checkout instead, as before.
+TEAM_WORKTREES=${TEAM_WORKTREES:-1}
+TEAM_WORKTREE_ROOT=${TEAM_WORKTREE_ROOT:-}
+TEAM_BRANCH_PREFIX=${TEAM_BRANCH_PREFIX:-feat/}
+
+# Run the gates of the same repo one at a time (for projects whose tests can't be isolated with
+# TEAM_PARTITION). A <repo>/.team/serialize-gates file turns it on for one repo only.
+TEAM_GATES_LOCK=${TEAM_GATES_LOCK:-0}
+
+# Feature NNN gets TEAM_PARTITION = TEAM_PARTITION_BASE + NNN (and MIX_TEST_PARTITION, the same),
+# which projects use to name the feature's own test database. The offset keeps it away from the
+# small numbers `mix test --partitions` and similar tools already use (base_app_test1, ...).
+TEAM_PARTITION_BASE=${TEAM_PARTITION_BASE:-100}

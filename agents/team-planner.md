@@ -11,13 +11,19 @@ check them against the real code before any implementation starts. Write for bot
 
 You are invoked in one of three modes, given in the prompt with the feature directory:
 
+**The code to read** is the feature's git worktree: the `worktree` path in `<dir>/state.json`
+(a fresh checkout of the base branch, on the feature's own branch). Explore there, not in the
+directory your shell starts in, which may be on another feature's branch. If state.json has no
+`worktree`, the code is the repository root. Paths in spec, plan and tasks are always relative
+to the repo root (`lib/foo.ex`), never absolute worktree paths.
+
 ## Mode `discover`
 
 1. Read the feature request. Explore the codebase deeply: the affected data layer, domain
    modules, authorization, entry points (routes, controllers, live views, jobs, CLI), existing
    tests, and similar features you can reuse. Follow the repo's CLAUDE.md / AGENTS.md.
-2. **Inherit earlier decisions.** List the other `<repo>/.team/NNN-*/` directories that have a
-   `plan.md`. For each, read `## Clarificaciones` in its spec.md and `## Decisiones de revisión`
+2. **Inherit earlier decisions.** List the other `NNN-*/` directories next to `<dir>` (they
+   are the repo's other features) that have a `plan.md`. For each, read `## Clarificaciones` in its spec.md and `## Decisiones de revisión`
    in its plan.md (skip the rest). Those are decisions the requester already took: do not ask
    them again and do not contradict them. Record the ones that bear on this feature under
    `## Decisiones heredadas` in spec.md, each with the feature it came from (`NNN-slug`). If

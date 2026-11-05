@@ -13,9 +13,12 @@ Arguments: $ARGUMENTS
 2. Show the table as is. Then, in at most one line per feature that is not `approved`, say what
    the next step is:
    - `planning`: the plan is not written yet → `/team-plan NNN` resumes it.
-   - `planned`: ready for `/team-dev NNN` from a clean feature branch.
+   - `planned`: ready for `/team-dev NNN` (it runs in the feature's worktree).
    - `developing`: the loop was interrupted → `/team-dev NNN` resumes at the next iteration.
-   - `incomplete`: reviews exhausted → read `final-report.md`, fix by hand or `/team-dev NNN --reset`.
+   - `incomplete`: reviews exhausted → read `final-report.md`, fix by hand in its worktree or `/team-dev NNN --reset`.
+   For an `approved` feature whose worktree still exists, mention that `/team-clean NNN` removes
+   it once the branch is merged. The worktree path of each feature is in `--json`; give it when
+   the user asks where a feature's code is.
 3. If any feature has items "para persona", point to `tasks.md` (`## Verificación manual`) and
    the "Requiere a una persona" sections of `review-report.md`.
 

@@ -12,8 +12,10 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
 
 ## Steps
 
-1. **Resolve the feature.** If an argument names a directory or an `NNN` prefix, use the
-   matching `<repo>/.team/NNN-*`. Otherwise use the highest-numbered `.team/NNN-*` directory
+1. **Resolve the feature.** `<repo>` is the main checkout (the parent of
+   `git rev-parse --path-format=absolute --git-common-dir`), also when the session is inside a
+   worktree. If an argument names a directory or an `NNN` prefix, use the matching
+   `<repo>/.team/NNN-*`. Otherwise use the highest-numbered `.team/NNN-*` directory
    and tell the user which one you picked. Call its absolute path `DIR`.
 
 2. **Preflight.** Run `~/.claude/team/bin/team-start "DIR"` (append `--reset` if the user
@@ -27,7 +29,7 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
 
 3. **Run the workflow.** Call the Workflow tool with
    `scriptPath: ~/.claude/team/dev-team.js` (expand `~` to the absolute home path) and
-   `args: { feature_dir: DIR, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>, max_iter: <max_iter>, developer: <developer object from ~/.claude/team/bin/team-config> }`.
+   `args: { feature_dir: DIR, worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>, max_iter: <max_iter>, developer: <developer object from ~/.claude/team/bin/team-config> }`.
    Pass the `developer` object exactly as printed: it holds the model and effort the user chose.
    It runs in the background; tell the user they can follow it in `/workflows`.
 
@@ -35,9 +37,10 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
    - approved or incomplete, and how many iterations it took
    - 3–6 lines of the essentials: what was built, and for an incomplete run what is still open
    - what only a person can do before merging (the report's "Pendiente para una persona")
-   - the commits (`git log --oneline <base_sha>..HEAD`)
+   - the commits (`git -C <worktree> log --oneline <base_sha>..HEAD`), the branch and the worktree path
    - the paths to `final-report.md`, `review-report.md` and `dev-log.md`
    If the workflow stopped early (`stopped_early`), say why and how to resume: fix the cause,
    then run `/team-dev` again, which continues from the next iteration.
 
-Never push or open a PR from this skill. The user decides that after reading the report.
+Never push or open a PR from this skill. The user decides that after reading the report. Once
+the branch is merged, `/team-clean NNN` removes the worktree.

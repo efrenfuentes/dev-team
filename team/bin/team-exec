@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Run a command in a feature's worktree, with the feature env (TEAM_PARTITION, MIX_TEST_PARTITION,
+# BASE_SHA, BASE_REF, ...). The Developer runs its tests and git commands through this, so they
+# never land in the main checkout and never share another feature's test database.
+#
+#   team-exec <feature_dir> <command> [args...]
+#   team-exec <feature_dir> bash -c 'mix test test/foo_test.exs && git status'
+set -euo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+dir=$(cd "${1:?usage: team-exec <feature_dir> <command> [args...]}" && pwd)
+shift
+[ $# -gt 0 ] || { echo "usage: team-exec <feature_dir> <command> [args...]" >&2; exit 2; }
+team_feature_env "$dir"
+cd "$TEAM_WORKTREE"
+exec "$@"

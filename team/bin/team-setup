@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Prepare a feature's worktree so its code builds and its tests run. Safe to run again.
+#
+#   team-setup <feature_dir>
+#
+# 1. Copies the untracked files the project needs (they never come with a checkout) from the main
+#    checkout: one path per line in <main>/.team/worktree-files (# comments allowed). A file that
+#    already exists in the worktree is left alone.
+# 2. Trusts mise and direnv configs, which a new directory does not inherit.
+# 3. Runs the first setup script found: <main>/.team/setup.sh, ~/.claude/team/setup/<repo>.sh,
+#    or the default for the stack (setup/stacks/elixir.sh for mix.exs, ruby.sh for Gemfile).
+#
+# Everything runs in the worktree with the feature env (TEAM_PARTITION, MIX_TEST_PARTITION,
+# TEAM_MAIN_REPO, ...). Output goes to <feature_dir>/logs/setup.log; the result is stored as
+# .setup in state.json and printed as JSON: {ok, script, log, exit_code}.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+dir=$(cd "${1:?usage: team-setup <feature_dir>}" && pwd)
+team_feature_env "$dir"
+[ -d "$TEAM_WORKTREE" ] || { jq -n --arg w "$TEAM_WORKTREE" '{ok: false, error: "worktree not found: \($w)"}'; exit 1; }
+cd "$TEAM_WORKTREE" || exit 1
+
+mkdir -p "$dir/logs"
+log="$dir/logs/setup.log"
+script=$(team_project_script setup "$dir" || team_stack_script "$TEAM_WORKTREE" || true)
+
+{
+  echo "== worktree $TEAM_WORKTREE · partition ${TEAM_PARTITION:-none}"
+  list="$TEAM_MAIN_REPO/.team/worktree-files"
+  if [ -f "$list" ]; then
+    while IFS= read -r rel || [ -n "$rel" ]; do
+      rel=${rel%%#*}
+      rel="${rel#"${rel%%[![:space:]]*}"}"
+      rel="${rel%"${rel##*[![:space:]]}"}"
+      [ -n "$rel" ] || continue
+      if [ ! -e "$TEAM_MAIN_REPO/$rel" ]; then echo "== skip $rel (not in the main checkout)"
+      elif [ -e "$rel" ]; then echo "== keep $rel (already in the worktree)"
+      else mkdir -p "$(dirname "$rel")" && cp -Rp "$TEAM_MAIN_REPO/$rel" "$rel" && echo "== copied $rel"
+      fi
+    done <"$list"
+  fi
+
+  if command -v mise >/dev/null 2>&1 && { [ -f mise.toml ] || [ -f .mise.toml ] || [ -f .tool-versions ]; }; then
+    echo "== mise trust"; mise trust --quiet 2>&1 || true
+  fi
+  if command -v direnv >/dev/null 2>&1 && [ -f .envrc ]; then
+    echo "== direnv allow"; direnv allow . 2>&1 || true
+  fi
+
+  if [ -n "$script" ]; then
+    echo "== setup: $script"
+    bash "$script" setup
+  else
+    echo "== no setup script for this repo (see README: Worktrees)"
+  fi
+} >"$log" 2>&1
+code=$?
+
+if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+  echo "== warning: the setup left the worktree dirty; team-start will refuse it until those files are ignored or removed" >>"$log"
+  git status --short >>"$log"
+fi
+
+ok=$([ $code -eq 0 ] && echo true || echo false)
+team_state_set "$dir" '.setup = {ok: $ok, script: (if $s == "" then null else $s end), log: $log}' \
+  --argjson ok "$ok" --arg s "$script" --arg log "$log"
+jq -n --argjson ok "$ok" --arg s "$script" --arg log "$log" --argjson code $code \
+  '{ok: $ok, script: (if $s == "" then null else $s end), log: $log, exit_code: $code}'
+[ $code -eq 0 ]

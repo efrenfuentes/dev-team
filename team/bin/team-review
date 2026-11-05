@@ -15,10 +15,10 @@ dir=$(cd "${2:?feature_dir required}" && pwd)
 n=${3:?n required}
 final_status=${4:-}
 
-TEAM="$HOME/.claude/team"
 # shellcheck source=/dev/null
-. "$TEAM/config.sh"
-repo=$(git -C "$dir" rev-parse --show-toplevel)
+. "$HOME/.claude/team/lib.sh"
+# Codex reviews the feature's worktree (the main checkout for features without one).
+repo=$(team_worktree "$dir")
 cd "$repo"
 
 # Some shells export a CODEX_HOME that has no login; pin the real one.

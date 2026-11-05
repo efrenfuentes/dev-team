@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# Create a new feature workspace under <repo>/.team/NNN-<slug>/ and print its absolute path.
+# Create a new feature workspace under <main>/.team/NNN-<slug>/ and print its absolute path.
 #
 #   team-init <slug> [base_ref]
 #
 # base_ref defaults to the remote's default branch (origin/HEAD), then the first of
 # origin/develop, origin/main, origin/master that exists.
 # .team/ is added to .git/info/exclude (local only), so it never shows up in commits.
+#
+# With TEAM_WORKTREES=1 (the default) it also creates the feature's worktree at
+# <TEAM_WORKTREE_ROOT>/NNN-<slug> on a new branch <TEAM_BRANCH_PREFIX><slug> cut from base_ref,
+# and prepares it with team-setup. A failed setup does not fail the init (planning only reads
+# code); it is printed to stderr and team-start retries it before development.
 set -euo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
 
 slug=${1:?usage: team-init <slug> [base_ref]}
 base_ref=${2:-}
 
-repo=$(git rev-parse --show-toplevel)
+main=$(team_main_repo)
 
 if [ -z "$base_ref" ]; then
   base_ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
@@ -22,17 +30,56 @@ if [ -z "$base_ref" ]; then
   fi
   [ -n "$base_ref" ] || { echo "cannot detect a base branch; pass it: team-init $slug <base_ref>" >&2; exit 1; }
 fi
+git rev-parse --verify -q "$base_ref^{commit}" >/dev/null || { echo "unknown base ref: $base_ref" >&2; exit 1; }
+
+branch=""
+wt=""
+if [ "$TEAM_WORKTREES" = 1 ]; then
+  branch="$TEAM_BRANCH_PREFIX$slug"
+  git check-ref-format --branch "$branch" >/dev/null 2>&1 || { echo "invalid branch name: $branch" >&2; exit 1; }
+  if git show-ref --verify -q "refs/heads/$branch"; then
+    echo "branch $branch already exists — pick another slug or delete the branch" >&2
+    exit 1
+  fi
+fi
+
 exclude="$(git rev-parse --path-format=absolute --git-common-dir)/info/exclude"
 mkdir -p "$(dirname "$exclude")"
 grep -qxF '.team/' "$exclude" 2>/dev/null || echo '.team/' >>"$exclude"
 
-mkdir -p "$repo/.team"
-n=$(find "$repo/.team" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9]-*' | wc -l | tr -d ' ')
-dir="$repo/.team/$(printf '%03d' $((n + 1)))-$slug"
+# Claim the next number atomically (mkdir fails if another /team-plan took it first).
+mkdir -p "$main/.team"
+while :; do
+  last=$(find "$main/.team" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9]-*' -exec basename {} \; |
+    cut -c1-3 | sort -n | tail -1)
+  num=$(printf '%03d' $((10#${last:-0} + 1)))
+  dir="$main/.team/$num-$slug"
+  mkdir "$dir" 2>/dev/null && break
+done
 mkdir -p "$dir/reviews" "$dir/gates"
 
+if [ "$TEAM_WORKTREES" = 1 ]; then
+  root=${TEAM_WORKTREE_ROOT:-"$(dirname "$main")/$(basename "$main").worktrees"}
+  wt="$root/$num-$slug"
+  mkdir -p "$root"
+  # --no-track: the feature branch must not have the base branch as its upstream.
+  if ! git -C "$main" worktree add --quiet --no-track -b "$branch" "$wt" "$base_ref" >&2; then
+    rm -rf "$dir"
+    echo "could not create the worktree at $wt" >&2
+    exit 1
+  fi
+fi
+
 jq -n --arg slug "$slug" --arg base_ref "$base_ref" --arg created "$(date -u +%FT%TZ)" \
-  '{feature: $slug, base_ref: $base_ref, created: $created, base_sha: null, branch: null}' \
-  >"$dir/state.json"
+  --arg wt "$wt" --arg branch "$branch" --arg part "$((TEAM_PARTITION_BASE + 10#$num))" '
+  {feature: $slug, base_ref: $base_ref, created: $created, base_sha: null,
+   branch: (if $branch == "" then null else $branch end)}
+  + (if $wt == "" then {} else {worktree: $wt, partition: ($part | tonumber)} end)' >"$dir/state.json"
+
+if [ -n "$wt" ]; then
+  if ! setup=$("$TEAM/bin/team-setup" "$dir"); then
+    echo "warning: worktree setup failed ($(echo "$setup" | jq -r '.log // "no log"')); team-start retries it before development" >&2
+  fi
+fi
 
 echo "$dir"

@@ -9,7 +9,10 @@ argument-hint: <feature description> [--base origin/main]
 Request: $ARGUMENTS
 
 Scripts live in `~/.claude/team/bin/`. The feature workspace is `<repo>/.team/NNN-<slug>/`,
-which is git-excluded locally.
+which is git-excluded locally. `<repo>` is always the main checkout, also when the session is
+inside one of its worktrees. The feature's code gets its own git worktree (the `worktree` path
+in `DIR/state.json`), on a new branch cut from the base, so several features can be in progress
+at once without touching the checkout the user is working in.
 
 Models and efforts are set by the user in `~/.claude/team/config.sh`. Run
 `~/.claude/team/bin/team-config` first. Every time you spawn `team-planner`, pass its
@@ -25,6 +28,11 @@ explicitly asked for these settings.
 1. **Workspace.** Pick a short kebab-case slug from the request. Run
    `~/.claude/team/bin/team-init <slug> [base_ref]` (base defaults to the remote's default
    branch; pass `--base` from the arguments if given). Call the printed absolute path `DIR`.
+   It also creates the worktree and branch and runs the worktree setup (dependencies, the
+   feature's test database). If it warns that the setup failed, tell the user and show the
+   last lines of `DIR/logs/setup.log`, but keep planning: the plan only reads code, and
+   `/team-dev` retries the setup before it starts. If `team-init` fails (for example, the branch
+   already exists), show the error and stop.
 
 2. **Discover.** Spawn the `team-planner` agent: mode `discover`, the feature directory `DIR`,
    and the full feature request verbatim. It drafts `spec.md` and returns open questions.
@@ -48,7 +56,8 @@ explicitly asked for these settings.
 6. **Hand off to the user.** Summarize in a few lines: the requirements, the number of
    tasks per phase, the plan-review outcome and any open findings, the items under
    `## Verificación manual (persona)` in tasks.md (things only the user can do), plus the paths
-   to `spec.md`, `plan.md`, `tasks.md` and `plan-review.md`. Ask them to review the plan, then start
-   development with `/team-dev` (from a clean feature branch).
+   to `spec.md`, `plan.md`, `tasks.md` and `plan-review.md`. Also give the worktree path and its
+   branch. Ask them to review the plan, then start development with `/team-dev NNN` (from any
+   checkout: it runs in the feature's worktree).
 
 Do not write code or start the dev loop from this skill.

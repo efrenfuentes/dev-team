@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Remove a feature's worktree once you are done with it (merged, or abandoned). Prints JSON.
+#
+#   team-clean <feature_dir> [--force]
+#
+# Keeps the branch (its commits, the PR) and the feature workspace in .team/ (spec, plan,
+# reports), so /team-status still lists it and team-start can recreate the worktree later.
+# Before removing, runs the teardown that drops the feature's own test database:
+# <main>/.team/teardown.sh, ~/.claude/team/teardown/<repo>.sh, or — only when the repo uses the
+# default stack setup — the stack's teardown. Refuses a worktree with uncommitted changes
+# unless --force (which discards them).
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+dir=$(cd "${1:?usage: team-clean <feature_dir> [--force]}" && pwd)
+force=${2:-}
+
+fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
+
+[ -f "$dir/state.json" ] || fail "missing state.json"
+wt=$(jq -r '.worktree // empty' "$dir/state.json")
+[ -n "$wt" ] || fail "this feature has no worktree (it was developed in the main checkout)"
+main=$(team_main_repo "$dir")
+[ -d "$wt" ] || { git -C "$main" worktree prune; jq -n --arg d "$dir" --arg w "$wt" '{ok: true, feature_dir: $d, worktree: $w, removed: false, note: "already removed"}'; exit 0; }
+
+dirty=$(git -C "$wt" status --porcelain --untracked-files=normal)
+if [ -n "$dirty" ] && [ "$force" != "--force" ]; then
+  fail "the worktree has uncommitted changes — commit them, or pass --force to discard them: $(echo "$dirty" | head -5 | tr '\n' ' ')"
+fi
+
+mkdir -p "$dir/logs"
+log="$dir/logs/teardown.log"
+teardown=$(team_project_script teardown "$dir" || true)
+if [ -z "$teardown" ] && ! team_project_script setup "$dir" >/dev/null; then
+  teardown=$(team_stack_script "$wt" || true)
+fi
+teardown_ok=true
+if [ -n "$teardown" ]; then
+  (team_feature_env "$dir" && cd "$wt" && bash "$teardown" teardown) >"$log" 2>&1 || teardown_ok=false
+fi
+
+args=(worktree remove "$wt")
+[ "$force" = "--force" ] && args=(worktree remove --force "$wt")
+git -C "$main" "${args[@]}" >>"$log" 2>&1 || fail "git worktree remove failed — see $log"
+
+team_state_set "$dir" '.worktree_removed = $t' --arg t "$(date -u +%FT%TZ)"
+jq -n --arg d "$dir" --arg w "$wt" --arg b "$(jq -r '.branch // ""' "$dir/state.json")" \
+  --arg t "$teardown" --argjson tok "$teardown_ok" --arg log "$log" '
+  {ok: true, feature_dir: $d, worktree: $w, removed: true, branch_kept: $b,
+   teardown: (if $t == "" then null else $t end), teardown_ok: $tok, log: $log}'

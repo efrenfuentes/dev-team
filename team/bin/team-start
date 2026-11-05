@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Preflight before the dev loop. Prints JSON: {ok, feature_dir, base_sha, branch, start_iter,
-# max_iter, finished, error?}
+# Preflight before the dev loop. Prints JSON: {ok, feature_dir, worktree, base_sha, branch,
+# start_iter, max_iter, finished, error?}
 #
 #   team-start <feature_dir> [--reset]
+#
+# Works in the feature's worktree (or the main checkout for features without one). If the
+# worktree was removed (team-clean), it is recreated from the feature branch; if its setup
+# failed or never ran, setup runs again first.
 #
 # Refuses to start on a dirty tree or on main/master/develop, because the Developer commits
 # every iteration and must not sweep up unrelated work. base_sha is recorded once and kept
@@ -13,19 +17,35 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/config.sh"
+. "$HOME/.claude/team/lib.sh"
 max=$TEAM_MAX_CODE_REVIEWS
 
 dir=$(cd "${1:?usage: team-start <feature_dir> [--reset]}" && pwd)
 reset=${2:-}
-cd "$dir"
-repo=$(git rev-parse --show-toplevel)
-cd "$repo"
 state="$dir/state.json"
 
 fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
 
 [ -f "$state" ] || fail "missing state.json — run team-init first"
+main=$(team_main_repo "$dir")
+repo=$(team_worktree "$dir")
+has_wt=$(jq -r 'has("worktree")' "$state")
+
+if [ "$has_wt" = true ]; then
+  if [ ! -d "$repo" ]; then
+    wt_branch=$(jq -r '.branch // empty' "$state")
+    [ -n "$wt_branch" ] && git -C "$main" show-ref --verify -q "refs/heads/$wt_branch" ||
+      fail "worktree $repo is gone and branch '${wt_branch:-?}' does not exist"
+    git -C "$main" worktree prune
+    git -C "$main" worktree add --quiet "$repo" "$wt_branch" >&2 || fail "could not recreate the worktree at $repo"
+    team_state_set "$dir" '.setup.ok = false | del(.worktree_removed)'
+  fi
+  if [ "$(jq -r '.setup.ok // false' "$state")" != true ]; then
+    "$TEAM/bin/team-setup" "$dir" >/dev/null ||
+      fail "worktree setup failed — see $dir/logs/setup.log, fix it and run ~/.claude/team/bin/team-setup $dir"
+  fi
+fi
+cd "$repo"
 [ -s "$dir/tasks.md" ] || fail "missing tasks.md — run /team-plan first"
 [ -s "$dir/plan.md" ] || fail "missing plan.md — run /team-plan first"
 
@@ -34,6 +54,10 @@ case "$branch" in
   "" ) fail "detached HEAD — switch to a feature branch" ;;
   main | master | develop ) fail "on protected branch '$branch' — create a feature branch first" ;;
 esac
+if [ "$has_wt" = true ]; then
+  want=$(jq -r '.branch // empty' "$state")
+  [ "$branch" = "$want" ] || fail "the worktree $repo is on '$branch', not on the feature branch '$want' — switch it back"
+fi
 
 dirty=$(git status --porcelain --untracked-files=normal)
 [ -z "$dirty" ] || fail "working tree is not clean — commit or stash first: $(echo "$dirty" | head -5 | tr '\n' ' ')"
@@ -71,4 +95,5 @@ if [ "$done_iters" -ge "$max" ] ||
 fi
 jq -n --arg d "$dir" --arg s "$base_sha" --arg b "$branch" --argjson i $((done_iters + 1)) --argjson f $finished \
   --argjson max "$max" \
-  '{ok: true, feature_dir: $d, base_sha: $s, branch: $b, start_iter: $i, max_iter: $max, finished: $f}'
+  --arg wt "$repo" \
+  '{ok: true, feature_dir: $d, worktree: $wt, base_sha: $s, branch: $b, start_iter: $i, max_iter: $max, finished: $f}'

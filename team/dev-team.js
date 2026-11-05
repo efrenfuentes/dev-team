@@ -9,10 +9,16 @@ export const meta = {
   ],
 }
 
-// args: { feature_dir, team_bin, max_iter + start_iter (from team-start),
+// args: { feature_dir, team_bin, worktree + max_iter + start_iter (from team-start),
 //         developer: {model, effort} (from team-config) }
 const DIR = args.feature_dir
 const BIN = args.team_bin
+const WT = args.worktree || null
+const WORKTREE_RULES = WT
+  ? `Worktree (the code you change, test and commit): ${WT}
+Run every shell command through \`${BIN}/team-exec "${DIR}" <command>\` (it runs in the worktree with the feature's environment, including its own test-database partition), or as \`git -C "${WT}" …\` for git. Edit files by their absolute path under the worktree. Never touch the main checkout you start in.
+`
+  : ''
 const MAX_ITER = args.max_iter || 6
 const DEVELOPER = args.developer || { model: 'opus', effort: 'medium' }
 const START = args.start_iter || 1
@@ -51,7 +57,7 @@ const REVIEW_SCHEMA = {
 const run = (cmd) => `Run this command from the repository root:\n\n${cmd}`
 
 const devPrompt = (i) => `Feature directory: ${DIR}
-Iteration ${i} of ${MAX_ITER}${i === MAX_ITER ? ' — the LAST one; the reviewer will not request further changes after this.' : '.'}
+${WORKTREE_RULES}Iteration ${i} of ${MAX_ITER}${i === MAX_ITER ? ' — the LAST one; the reviewer will not request further changes after this.' : '.'}
 
 ${i === 1
     ? 'Implement the plan: work the unchecked tasks in tasks.md in order.'

@@ -10,6 +10,25 @@ tasks; a Reviewer from another company (a different model) reviews your work aft
 iteration and appends correction tasks. You have a limited number of iterations to win its
 approval; each prompt tells you which iteration you are on and how many there are.
 
+## Where you work
+
+The feature's code lives in its own git worktree, given in the prompt (and as `worktree` in
+`<dir>/state.json`). Other features may be in progress at the same time in other worktrees and
+in the main checkout your shell starts in, so:
+
+- Edit files only by their absolute path under the worktree.
+- Run every command through `~/.claude/team/bin/team-exec <dir> <command>` (e.g.
+  `team-exec <dir> mix test test/foo_test.exs`, or `team-exec <dir> bash -c '…'` for a
+  pipeline). It runs in the worktree with the feature's environment, including
+  `TEAM_PARTITION`/`MIX_TEST_PARTITION`, which give the feature its own test database. A bare
+  `mix test` or `bin/rails test` in your starting directory would test, and maybe break, another
+  checkout.
+- Run git as `git -C <worktree> …` or through `team-exec`, never a bare `git` in your starting
+  directory: a commit there lands on another branch.
+
+If the feature has no `worktree` in state.json, it was set up before worktrees: work in the
+repository root as usual.
+
 ## Each iteration
 
 1. Iteration 1: read `<dir>/spec.md`, `<dir>/plan.md`, `<dir>/tasks.md` in full. From
@@ -23,11 +42,12 @@ approval; each prompt tells you which iteration you are on and how many there ar
    it, write or update its tests, run the targeted tests, then mark it `- [x]` in tasks.md.
    Only mark a task done when it is done and its tests pass.
 4. Before committing: run the tests for everything you touched, then **run the gates
-   yourself**. The gate script is `<repo>/.team/gates.sh` if it exists, else
-   `~/.claude/team/gates/<repo-name>.sh`; run it from the repo root with `BASE_SHA` and
-   `BASE_REF` exported from `<dir>/state.json`. Fix what fails before you commit: a failed gate
-   after your iteration costs a whole review round. If neither script exists, run the checks
-   the repo's CLAUDE.md requires before a commit (linter, formatter in check mode, etc.).
+   yourself** with `~/.claude/team/bin/team-gates <dir>` (no iteration number: that is your own
+   check, logged to `<dir>/gates/check.log`). It runs the repo's gate script in the worktree
+   with the right environment, and waits its turn if the repo's gates must not run in parallel.
+   Fix what fails before you commit: a failed gate after your iteration costs a whole review
+   round. If it reports `configured: false`, run the checks the repo's CLAUDE.md requires
+   before a commit (linter, formatter in check mode, etc.) through `team-exec`.
    If you cannot make the gates pass, still commit your work and say so in your result and in
    dev-log.md. Do not run test suites concurrently.
 5. **Commit** your work: one or more commits with Conventional Commit messages
