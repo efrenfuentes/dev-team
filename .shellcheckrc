@@ -1,0 +1,4 @@
+# SC2016: jq and perl programs are single-quoted on purpose; their $vars are not shell expansions.
+# SC2015: `[ a ] && [ b ] || fail` is used only where fail must run when either test fails.
+disable=SC2016,SC2015
+external-sources=true

@@ -322,3 +322,23 @@ team/
 ## Licencia
 
 [MIT](LICENSE) © 2026 Efrén Fuentes
+
+## Tests del equipo
+
+```bash
+test/run.sh                       # shellcheck + suites bats + tests de los workflows
+test/run.sh test/ship_sync.bats   # solo esos suites de bats
+```
+
+- **`shellcheck`** sobre todos los scripts (`.shellcheckrc` explica las dos reglas desactivadas).
+- **`bats`** (`test/*.bats`): cada test crea un `HOME` temporal con `~/.claude/team` apuntando a
+  este repo, un repo git con su remoto bare y features reales con `team-init`. `gh` y `codex` son
+  falsos (`test/fakes/`): `gh` responde desde fixtures y registra cada llamada; `codex` elige el
+  fixture según el prompt (código, seguridad, plan o informe final) y guarda el prompt para que
+  el test lo revise. Nada sale de la máquina.
+- **`node --test`** (`test/workflows.test.mjs`): corre `dev-team.js` y `plan-review.js` con un
+  `agent()` guionado y verifica la secuencia de agentes, los prompts y el resultado.
+
+Las herramientas se toman del `PATH`, o con `mise exec` si faltan (`mise install` instala las
+versiones de `mise.toml`). GitHub Actions corre lo mismo en cada push a `main` y en cada PR
+(`.github/workflows/test.yml`).

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Fake Codex CLI for the tests: `codex exec … -o <out> -` with the prompt on stdin.
+# The prompt picks the fixture: security reviewer → $FAKE_DIR/codex-security.json, plan reviewer →
+# codex-plan.json, final report → codex-final.md, otherwise codex-code.json. Each prompt is saved
+# as $FAKE_DIR/prompts/<n>-<kind>.md. FAKE_CODEX_FAIL=<kind> makes that kind exit 1.
+set -u
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in -o) out=$2; shift ;; esac
+  shift
+done
+prompt=$(cat)
+if grep -q 'Reviewer de seguridad' <<<"$prompt"; then kind=security
+elif grep -q 'informe final' <<<"$prompt"; then kind=final
+elif grep -q 'Ronda de revisión del plan' <<<"$prompt"; then kind=plan
+else kind=code
+fi
+mkdir -p "$FAKE_DIR/prompts"
+n=$(find "$FAKE_DIR/prompts" -type f | wc -l | tr -d ' ')
+printf '%s' "$prompt" >"$FAKE_DIR/prompts/$((n + 1))-$kind.md"
+[ "${FAKE_CODEX_FAIL:-}" = "$kind" ] && { echo "fake codex failure ($kind)" >&2; exit 1; }
+case "$kind" in
+  final) cp "$FAKE_DIR/codex-final.md" "$out" 2>/dev/null || echo "# Informe final (fake)" >"$out" ;;
+  *) cp "$FAKE_DIR/codex-$kind.json" "$out" ;;
+esac

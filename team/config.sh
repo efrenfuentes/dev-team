@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Dev team limits — the single place to change them. Sourced by the bin/ scripts; the
 # dev-team workflow receives the code limit from team-start. Env vars override per run.
 

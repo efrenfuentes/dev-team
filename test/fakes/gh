@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake GitHub CLI for the tests. Every call is appended to $FAKE_DIR/gh.log.
+#   pr list     → $FAKE_DIR/pr-list.json, or [] (pr create writes it)
+#   pr create   → prints $FAKE_GH_PR_URL (default https://github.com/o/r/pull/7)
+#   api graphql → $FAKE_DIR/graphql.json
+#   api repos/… → {"html_url": …}; the -f body= value is appended to $FAKE_DIR/gh-bodies.log
+# FAKE_GH_AUTH=0 makes `auth status` fail.
+set -u
+{ printf 'gh'; printf ' %q' "$@"; echo; } >>"$FAKE_DIR/gh.log"
+url=${FAKE_GH_PR_URL:-https://github.com/o/r/pull/7}
+case "$1 ${2:-}" in
+  "auth status") [ "${FAKE_GH_AUTH:-1}" = 1 ] ;;
+  "pr list") cat "$FAKE_DIR/pr-list.json" 2>/dev/null || echo '[]' ;;
+  "pr create")
+    jq -n --arg u "$url" '[{number: 7, url: $u, isDraft: false}]' >"$FAKE_DIR/pr-list.json"
+    echo "$url" ;;
+  "api graphql") cat "$FAKE_DIR/graphql.json" ;;
+  api\ repos/*)
+    for a in "$@"; do case "$a" in body=*) printf '%s\n---\n' "${a#body=}" >>"$FAKE_DIR/gh-bodies.log" ;; esac; done
+    echo "{\"html_url\": \"$url#posted\"}" ;;
+  *) echo "fake gh: unsupported: $*" >&2; exit 1 ;;
+esac

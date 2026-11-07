@@ -130,7 +130,7 @@ case "$mode" in
   plan)
     [ "$n" -le "$MAX_PLAN_ROUNDS" ] || over_limit "$MAX_PLAN_ROUNDS"
     out="$dir/reviews/plan-$n.json"
-    prev_files=$(ls "$dir"/reviews/plan-*.json 2>/dev/null | grep -v "plan-$n.json" | sort -V || true)
+    prev_files=$(find "$dir/reviews" -name 'plan-*.json' ! -name "plan-$n.json" 2>/dev/null | sort -V)
     PREV_REVIEWS=$(echo "$prev_files" | tr '\n' ' ')
     # shellcheck disable=SC2086
     PREV_OPEN=$(open_findings $prev_files)
@@ -151,7 +151,7 @@ case "$mode" in
     # own changes into this iteration's diff: measure the iteration from the synced head instead.
     synced=$(jq -r --argjson p $((n - 1)) '[.syncs[]? | select(.after_review == $p)] | last | .to_head // empty' "$dir/state.json")
     [ -n "$synced" ] && PREV_SHA=$synced
-    prev_files=$(ls "$dir"/reviews/code-*.json 2>/dev/null | grep -v "code-$n.json" | sort -V || true)
+    prev_files=$(find "$dir/reviews" -name 'code-*.json' ! -name "code-$n.json" 2>/dev/null | sort -V)
     PREV_REVIEWS=$(echo "$prev_files" | tr '\n' ' ')
     # shellcheck disable=SC2086
     PREV_OPEN=$(open_findings $prev_files)
@@ -208,7 +208,8 @@ case "$mode" in
 
   final)
     case "$final_status" in approved | incomplete) ;; *) echo '{"verdict":"ERROR","error":"status must be approved|incomplete"}'; exit 1 ;; esac
-    PREV_REVIEWS=$(ls "$dir"/reviews/code-*.json 2>/dev/null | tr '\n' ' ' || true)
+    # sort -V: with a /team-respond budget there can be a code-10.json, which ls puts before code-2.
+    PREV_REVIEWS=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | sort -V | tr '\n' ' ')
     render reviewer-final >"$tmp/prompt.md"
     run_codex "$tmp/prompt.md" "$dir/final-report.md"
     jq -n --arg s "$final_status" --arg r "$dir/final-report.md" '{verdict: "REPORTED", status: $s, report: $r}'
