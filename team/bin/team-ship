@@ -54,13 +54,7 @@ fi
 # base_ref "origin/main" → remote origin, base branch main. A local base ("main") ships to origin.
 base_ref=$(jq -r '.base_ref // empty' "$state")
 [ -n "$base_ref" ] || fail "state.json has no base_ref"
-remote=origin
-base=$base_ref
-first=${base_ref%%/*}
-if [ "$first" != "$base_ref" ] && git remote | grep -qxF "$first"; then
-  remote=$first
-  base=${base_ref#*/}
-fi
+read -r remote base <<<"$(team_base_remote "$dir")"
 git remote get-url "$remote" >/dev/null 2>&1 || fail "no git remote '$remote'"
 
 command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed"
@@ -74,9 +68,10 @@ commits=$(git rev-list --count "$base_sha..$branch")
 
 # Where the dev loop ended: approved, incomplete (reviews used up), developing, or not run.
 code_n=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | wc -l | tr -d ' ')
+max_reviews=$(team_review_budget "$dir")
 if [ "$code_n" -eq 0 ]; then status=not_reviewed
 elif [ "$(jq -r .verdict "$dir/reviews/code-$code_n.json")" = APPROVED ]; then status=approved
-elif [ "$code_n" -ge "$TEAM_MAX_CODE_REVIEWS" ]; then status=incomplete
+elif [ "$code_n" -ge "$max_reviews" ]; then status=incomplete
 else status=developing
 fi
 
@@ -109,7 +104,7 @@ if [ ! -f "$body" ]; then
     git log --reverse --format='- %h %s' "$base_sha..$branch"; echo
     case "$status" in
       approved) echo "_Aprobado por el Reviewer tras $code_n iteración(es)._" ;;
-      incomplete) echo "_⚠️ El ciclo terminó **sin aprobación** del Reviewer ($code_n/$TEAM_MAX_CODE_REVIEWS revisiones). Ver los pendientes antes de fusionar._" ;;
+      incomplete) echo "_⚠️ El ciclo terminó **sin aprobación** del Reviewer ($code_n/$max_reviews revisiones). Ver los pendientes antes de fusionar._" ;;
       developing) echo "_⚠️ El ciclo de desarrollo no terminó ($code_n revisiones; la última pidió cambios)._" ;;
       not_reviewed) echo "_⚠️ Este código no pasó por el Reviewer._" ;;
     esac

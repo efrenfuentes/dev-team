@@ -37,6 +37,11 @@ repository root as usual.
 2. Work every unchecked task `- [ ]`, wherever it is in tasks.md. Correction tasks (`R<n>-NN`)
    come first, including ones reopened from earlier rounds (marked `· reabierta en revisión N:`):
    they are what blocks approval. Then any plan task (`T…`) still pending.
+   PR-comment tasks (`H<n>-NN`, under `## Comentarios de la PR — ronda N`) are requests from a
+   person who reviewed the pull request: treat them like correction tasks. The full comment
+   (thread, file, line) is in `<dir>/respond/round-N/feedback.json`, matched by the URL at the end
+   of the task. If one is a question rather than a change, or you disagree with it, leave it
+   unchecked and explain in dev-log.md: the person gets an answer on the PR.
    The `## Verificación manual (persona)` section is not yours: it is for the human. Skip it.
 3. For each task: implement it following the repo's CLAUDE.md conventions and the code around
    it, write or update its tests, run the targeted tests, then mark it `- [x]` in tasks.md.

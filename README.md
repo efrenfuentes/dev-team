@@ -22,7 +22,7 @@ git clone <url-de-este-repo> ~/Developer/dev-team
 
 ```
 ~/.claude/agents/team-{planner,developer,runner}.md  →  agents/
-~/.claude/skills/team-plan, team-dev, team-status, team-ship, team-clean  →  skills/
+~/.claude/skills/team-{plan,dev,status,sync,ship,respond,clean}  →  skills/
 ~/.claude/team                                       →  team/
 ```
 
@@ -42,7 +42,7 @@ Reinicia Claude Code después de instalar.
 - **Codex CLI** con sesión iniciada (`brew install codex` y luego `codex login`) y acceso a
   `gpt-6-astra`. Si tu login de Codex no está en `~/.codex`, define `TEAM_CODEX_HOME`.
 - **jq**, **perl** y **git** (`brew install jq`; perl ya viene en macOS).
-- **gh** (GitHub CLI) con sesión iniciada, solo para `/team-ship`.
+- **gh** (GitHub CLI) con sesión iniciada, solo para `/team-ship` y `/team-respond`.
 - Las herramientas que usen los gates de cada proyecto (compilador, test runner, linter).
 
 ## Uso
@@ -59,19 +59,28 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    `origin/master` que exista).
 2. Revisa `spec.md`, `plan.md` y `tasks.md`.
 3. **`/team-status`** muestra en qué fase está cada feature del repo (planning, planned,
-   developing, approved, incomplete), con rondas, iteraciones, tareas abiertas y lo que
-   requiere a una persona.
+   developing, responding, approved, incomplete), con rondas, iteraciones, tareas abiertas, lo
+   que requiere a una persona y su PR.
 4. **`/team-dev [NNN] [--reset]`**
    Repite el ciclo Developer → gates → Reviewer hasta que el Reviewer aprueba, con un máximo de
    6 revisiones (la implementación inicial más 5 rondas de corrección). Si los gates fallan
    después de una iteración, el Developer tiene hasta 2 rondas para arreglarlos antes de que
    revise el Reviewer (ver [Reparación de gates](#reparación-de-gates)). Al final escribe
    `final-report.md`. Nunca hace push ni abre PRs: eso es `/team-ship`.
-5. **`/team-ship NNN [--draft]`**, cuando decides publicarla: hace push de la rama y abre la PR
+5. **`/team-sync NNN [--rebase|--merge]`**, cuando la base avanzó: trae los cambios de la rama
+   base a la feature (rebase si la rama nunca se publicó, merge si ya está en el remoto; nunca
+   force push). Si hay conflictos, los resuelve el Developer. Después corre de nuevo el setup y
+   los gates. Ver [Sincronizar con la base](#sincronizar-con-la-base).
+6. **`/team-ship NNN [--draft]`**, cuando decides publicarla: hace push de la rama y abre la PR
    con `gh` hacia la rama base. Antes te muestra el título, el estado del ciclo y el cuerpo
    (`.team/NNN-slug/pr-body.md`, que puedes editar) y pide confirmación. Si el Reviewer no
    aprobó, recomienda abrirla como borrador. Ver [Publicar la feature](#publicar-la-feature).
-6. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
+7. **`/team-respond NNN`**, cuando alguien comentó la PR: trae los comentarios sin responder, te
+   muestra cómo los clasifica (cambio, pregunta o nada que hacer) y, cuando confirmas, convierte
+   los cambios en tareas `H<n>-NN` y corre Developer → gates → Reviewer sobre ellas. Al final,
+   con tu confirmación, hace push y responde en cada hilo. Ver
+   [Responder la revisión de la PR](#responder-la-revisión-de-la-pr).
+8. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
    worktree y la base de datos de test de la feature. La rama y `.team/NNN-slug/` se conservan.
 
 Puedes tener varias features a la vez: planifica una mientras otra está en `/team-dev`, o corre
@@ -113,6 +122,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_MAX_PLAN_ROUNDS` | `5` |
 | `TEAM_MAX_CODE_REVIEWS` | `6` |
 | `TEAM_GATE_FIX_ROUNDS` | `2` (0 manda los gates en rojo directo a revisión) |
+| `TEAM_RESPOND_REVIEWS` | `2` (revisiones extra por ronda de `/team-respond`) |
 | `TEAM_SECURITY_REVIEW` | `1` (0 la desactiva) |
 | `TEAM_WORKTREES` | `1` (0 trabaja en el checkout actual, como antes) |
 | `TEAM_WORKTREE_ROOT` | `../<repo>.worktrees` |
@@ -186,6 +196,56 @@ deja su sección en `dev-log.md`.
 
 Requiere [`gh`](https://cli.github.com/) con sesión iniciada (`gh auth login`). Nunca fusiona la
 PR, ni borra la rama, ni pide reviewers.
+
+## Sincronizar con la base
+
+`/team-sync NNN` (script: `~/.claude/team/bin/team-sync`) actualiza la rama de la feature con
+`base_ref`, dentro de su worktree:
+
+| La rama… | Estrategia | Por qué |
+|---|---|---|
+| nunca se publicó | `rebase` | historial lineal, sin merge commits |
+| ya está en el remoto | `merge` de la base | un rebase obligaría a hacer force push |
+
+Si el rebase choca con conflictos, se aborta y se rehace como merge, así los conflictos se
+resuelven una sola vez, en un único commit. Los resuelve el Developer, conservando los cambios de
+la base y lo que pide la spec, y anota en `dev-log.md` cómo combinó cada archivo. Si un conflicto
+requiere una decisión de producto, deja el merge a medias y te lo explica.
+
+Al terminar (`team-sync DIR finish`):
+
+- `base_sha` pasa a ser el nuevo merge-base, así las revisiones siguen viendo solo el diff de la
+  feature. La sincronización queda en `state.json` (`.syncs`), y la siguiente revisión mide su
+  iteración desde la cabeza sincronizada, no desde la anterior.
+- Corre `team-setup` otra vez (la base puede traer dependencias o migraciones nuevas) y los gates.
+- Nunca hace push. Si la rama ya estaba publicada, `/team-sync` te ofrece subir el merge.
+
+No lo corras mientras `/team-dev` o `/team-respond` trabajan sobre la misma feature.
+
+## Responder la revisión de la PR
+
+`/team-respond NNN` (script: `~/.claude/team/bin/team-respond`) cierra el ida y vuelta con quien
+revisa la PR:
+
+1. **`fetch`** lee la PR con una consulta GraphQL y se queda con lo que nadie respondió: hilos sin
+   resolver cuyo último comentario no es del equipo, reviews con comentario (cambios pedidos o
+   comentarios) y comentarios de la conversación. Ignora a los bots, las respuestas del equipo
+   (llevan la marca `<!-- dev-team -->`) y lo ya atendido en rondas anteriores. Queda en
+   `.team/NNN-slug/respond/round-N/feedback.json`.
+2. Claude **clasifica** cada comentario (cambio, pregunta o nada que hacer), te muestra la tabla y
+   espera tu confirmación. Lo que pide una decisión de producto te lo pregunta.
+3. **`tasks`** agrega `## Comentarios de la PR — ronda N` a `tasks.md`, con una tarea `H<N>-NN` por
+   cada cambio, y abre una ronda del loop: el límite de revisiones de la feature sube a las ya
+   usadas más `TEAM_RESPOND_REVIEWS` (queda en `state.json` como `review_budget`), así que
+   funciona aunque el ciclo ya estuviera aprobado o agotado.
+4. Corre el workflow `dev-team` con el Developer enfocado en las tareas `H`, más los gates (con
+   reparación) y el Reviewer, que también verifica las tareas `H`.
+5. Te muestra las respuestas y los commits, y con tu confirmación hace push y **`reply`**: responde
+   dentro de cada hilo y, para reviews y comentarios sueltos, con un comentario que enlaza al
+   original. Los hilos los resuelve quien revisa, no el equipo.
+
+`--reset` de `/team-dev` conserva las secciones de comentarios de la PR: son pedidos de una
+persona, no del Reviewer.
 
 ## Worktrees
 

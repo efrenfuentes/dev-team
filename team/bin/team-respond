@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# Turn a person's comments on the feature's PR into work for the team, and answer them. Prints JSON.
+#
+#   team-respond <feature_dir> fetch            # new PR feedback → respond/round-N/feedback.json
+#   team-respond <feature_dir> tasks <round>    # respond/round-N/plan.json → H<N>-NN tasks in tasks.md
+#   team-respond <feature_dir> reply <round>    # respond/round-N/replies.json → replies on the PR
+#
+# fetch reads the PR (state.json .pr.url, or the open PR of the branch) with one GraphQL call and
+# keeps what nobody answered yet: unresolved review threads whose last comment is not ours, review
+# bodies (changes requested / commented) and conversation comments. Bots, our own replies (marked
+# with <!-- dev-team -->) and items already handled in earlier rounds (.respond.seen) are skipped.
+# Fetching again before `tasks` reuses the same round.
+#
+# plan.json, written by the /team-respond skill after the user confirms the triage:
+#   [{key, task: "<what to change>" | null, reply: "<answer>" | null}]
+# tasks appends "## Comentarios de la PR — ronda N" with one "- [ ] H<N>-NN" per item with a task,
+# marks every fetched item as seen (also the ones left without a task), and when there are tasks,
+# opens a dev-loop round: review_budget = reviews used + TEAM_RESPOND_REVIEWS, and
+# respond.pending = {round, from_iter} so team-start resumes an approved loop.
+#
+# replies.json: [{key, body}]. A thread gets a reply in the thread; a review or conversation comment
+# gets a conversation comment that links to it. reply clears respond.pending.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+MARKER='<!-- dev-team -->'
+
+dir=$(cd "${1:?usage: team-respond <feature_dir> fetch | tasks <round> | reply <round>}" && pwd)
+mode=${2:-}
+round=${3:-}
+state="$dir/state.json"
+
+fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
+
+[ -f "$state" ] || fail "missing state.json"
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed"
+gh auth status >/dev/null 2>&1 || fail "gh is not authenticated — run: gh auth login"
+cd "$(team_main_repo "$dir")" || exit 1
+
+url=$(jq -r '.pr.url // empty' "$state")
+if [ -z "$url" ]; then
+  branch=$(jq -r '.branch // empty' "$state")
+  [ -n "$branch" ] || fail "the feature has no branch"
+  url=$(gh pr list --head "$branch" --state open --json url --limit 1 2>/dev/null | jq -r '.[0].url // empty')
+  [ -n "$url" ] || fail "no open PR for branch '$branch' — /team-ship opens it"
+  team_state_set "$dir" '.pr.url = $u' --arg u "$url"
+fi
+[[ "$url" =~ github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]] || fail "not a GitHub PR URL: $url"
+owner=${BASH_REMATCH[1]} name=${BASH_REMATCH[2]} number=${BASH_REMATCH[3]}
+
+rdir() { echo "$dir/respond/round-$1"; }
+need_round() { [[ "$round" =~ ^[0-9]+$ ]] && [ -d "$(rdir "$round")" ] || fail "unknown round '$round'"; }
+
+case "$mode" in
+  fetch)
+    # Reuse the latest round while its triage (plan.json) is not written yet.
+    last=$(find "$dir/respond" -mindepth 1 -maxdepth 1 -type d -name 'round-*' 2>/dev/null | sed 's/.*round-//' | sort -n | tail -1)
+    if [ -n "$last" ] && [ ! -f "$(rdir "$last")/plan.json" ]; then round=$last; else round=$(( ${last:-0} + 1 )); fi
+    out=$(rdir "$round")
+    mkdir -p "$out"
+
+    query='query($owner: String!, $name: String!, $n: Int!) {
+      repository(owner: $owner, name: $name) { pullRequest(number: $n) {
+        state
+        reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine
+          comments(first: 100) { nodes { databaseId body url author { login __typename } } } } }
+        reviews(first: 100) { nodes { databaseId state body url author { login __typename } } }
+        comments(first: 100) { nodes { databaseId body url author { login __typename } } }
+      } } }'
+    gh api graphql -f query="$query" -F owner="$owner" -F name="$name" -F n="$number" >"$out/raw.json" 2>"$out/gh.err" ||
+      fail "gh api graphql failed: $(head -3 "$out/gh.err" | tr '\n' ' ')"
+
+    jq --arg m "$MARKER" --argjson seen "$(jq '.respond.seen // []' "$state")" '
+      .data.repository.pullRequest as $pr
+      | def ours: .body | contains($m);
+        def bot: (.author.__typename // "") == "Bot" or ((.author.login // "") | endswith("[bot]"));
+        def fresh: (.databaseId | IN($seen[]) | not);
+      [ ($pr.reviewThreads.nodes[]
+          | select(.isResolved | not)
+          | .comments.nodes as $c
+          | select(($c | length) > 0)
+          | ($c | last) as $last
+          | select(($last | ours | not) and ($last | bot | not) and ($last | fresh))
+          | {key: ("t:" + .id), kind: "thread", author: $last.author.login, url: $last.url,
+             path, line: (.line // .originalLine), outdated: .isOutdated,
+             reply_to: $c[0].databaseId, seen_id: $last.databaseId,
+             body: ($c | map(select(ours | not) | "@\(.author.login): \(.body)") | join("\n\n"))}),
+        ($pr.reviews.nodes[]
+          | select((.state == "CHANGES_REQUESTED" or .state == "COMMENTED") and (.body | length) > 0)
+          | select((ours | not) and (bot | not) and fresh)
+          | {key: ("r:" + (.databaseId | tostring)), kind: "review", author: .author.login, url,
+             state, seen_id: .databaseId, body}),
+        ($pr.comments.nodes[]
+          | select((ours | not) and (bot | not) and fresh)
+          | {key: ("c:" + (.databaseId | tostring)), kind: "comment", author: .author.login, url,
+             seen_id: .databaseId, body})
+      ]' "$out/raw.json" >"$out/feedback.json" || fail "could not parse the PR feedback"
+
+    jq -n --arg d "$dir" --arg u "$url" --argjson r "$round" --arg f "$out/feedback.json" \
+      --arg s "$(jq -r '.data.repository.pullRequest.state' "$out/raw.json")" --slurpfile items "$out/feedback.json" '
+      {ok: true, feature_dir: $d, pr: $u, pr_state: $s, round: $r, feedback: $f,
+       count: ($items[0] | length), items: $items[0]}'
+    ;;
+
+  tasks)
+    need_round
+    out=$(rdir "$round")
+    [ -f "$out/plan.json" ] || fail "missing $out/plan.json — the triage of round $round"
+    [ ! -f "$out/tasks.json" ] || fail "round $round already has tasks"
+    # Join the triage with the fetched items, numbering the ones that carry a task.
+    jq --slurpfile fb "$out/feedback.json" --arg r "$round" '
+      ($fb[0] | map({key: .key, value: .}) | from_entries) as $items
+      | [ .[] | select((.task // "") != "") | . + {item: $items[.key]} | select(.item != null) ]
+      | to_entries
+      | map(.value + {id: ("H" + $r + "-" + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))})' "$out/plan.json" >"$out/tasks.json" || fail "invalid plan.json"
+
+    n_tasks=$(jq length "$out/tasks.json")
+    if [ "$n_tasks" -gt 0 ]; then
+      lines=$(jq -r '.[] | "- [ ] \(.id) \(.task)"
+        + (if .item.path then " (`\(.item.path)\(if .item.line then ":\(.item.line)" else "" end)`)" else "" end)
+        + " · @\(.item.author): \(.item.url)"' "$out/tasks.json")
+      printf '\n## Comentarios de la PR — ronda %s\n\nDetalle de cada comentario: `%s`\n\n%s\n' \
+        "$round" "$out/feedback.json" "$lines" >>"$dir/tasks.md"
+      done_reviews=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | wc -l | tr -d ' ')
+      budget=$(team_review_budget "$dir")
+      want=$((done_reviews + TEAM_RESPOND_REVIEWS))
+      [ "$want" -gt "$budget" ] && budget=$want
+      team_state_set "$dir" '.review_budget = $b | .respond.pending = {round: $r, from_iter: $f}' \
+        --argjson b "$budget" --argjson r "$round" --argjson f $((done_reviews + 1))
+    fi
+    team_state_set "$dir" '.respond.seen = ((.respond.seen // []) + [$fb[0][].seen_id] | unique)' \
+      --slurpfile fb "$out/feedback.json"
+    jq -n --arg d "$dir" --argjson r "$round" --argjson n "$n_tasks" --slurpfile t "$out/tasks.json" \
+      --argjson budget "$(team_review_budget "$dir")" '
+      {ok: true, feature_dir: $d, round: $r, tasks_added: $n, task_ids: ($t[0] | map(.id)),
+       review_budget: $budget}'
+    ;;
+
+  reply)
+    need_round
+    out=$(rdir "$round")
+    [ -f "$out/replies.json" ] || fail "missing $out/replies.json"
+    : >"$out/replies.log"
+    posted=0 failed=0
+    while IFS= read -r r; do
+      key=$(jq -r .key <<<"$r")
+      body="$(jq -r .body <<<"$r")"$'\n\n'"$MARKER"
+      item=$(jq -c --arg k "$key" '.[] | select(.key == $k)' "$out/feedback.json")
+      [ -n "$item" ] || { echo "skip $key: not in feedback.json" >>"$out/replies.log"; failed=$((failed + 1)); continue; }
+      if [ "$(jq -r .kind <<<"$item")" = thread ]; then
+        endpoint="repos/$owner/$name/pulls/$number/comments/$(jq -r .reply_to <<<"$item")/replies"
+      else
+        endpoint="repos/$owner/$name/issues/$number/comments"
+        body="> $(jq -r .url <<<"$item")"$'\n\n'"$body"
+      fi
+      if res=$(gh api "$endpoint" -f body="$body" 2>>"$out/replies.log"); then
+        echo "ok $key $(jq -r .html_url <<<"$res")" >>"$out/replies.log"
+        posted=$((posted + 1))
+      else
+        echo "fail $key" >>"$out/replies.log"
+        failed=$((failed + 1))
+      fi
+    done < <(jq -c '.[]' "$out/replies.json")
+    team_state_set "$dir" 'del(.respond.pending) | .respond.last_round = $r' --argjson r "$round"
+    jq -n --arg d "$dir" --argjson r "$round" --argjson p "$posted" --argjson f "$failed" --arg log "$out/replies.log" \
+      '{ok: ($f == 0), feature_dir: $d, round: $r, posted: $p, failed: $f, log: $log}'
+    ;;
+
+  *) fail "mode must be fetch, tasks or reply" ;;
+esac

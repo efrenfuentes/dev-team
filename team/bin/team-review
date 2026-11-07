@@ -27,7 +27,9 @@ model=$TEAM_REVIEW_MODEL
 effort=$TEAM_REVIEW_EFFORT
 
 export FEATURE_DIR="$dir" ITER="$n" FINAL_STATUS="$final_status"
-export MAX_ITER="$TEAM_MAX_CODE_REVIEWS" MAX_PLAN_ROUNDS="$TEAM_MAX_PLAN_ROUNDS"
+MAX_ITER=$(team_review_budget "$dir")
+MAX_PLAN_ROUNDS=$TEAM_MAX_PLAN_ROUNDS
+export MAX_ITER MAX_PLAN_ROUNDS="$TEAM_MAX_PLAN_ROUNDS"
 export BASE_SHA BASE_REF HEAD_SHA PREV_SHA GATES_LOG GATES_PASSED PREV_REVIEWS PREV_OPEN
 BASE_SHA=$(jq -r '.base_sha // empty' "$dir/state.json")
 BASE_REF=$(jq -r '.base_ref' "$dir/state.json")
@@ -145,6 +147,10 @@ case "$mode" in
     out="$dir/reviews/code-$n.json"
     prev="$dir/reviews/code-$((n - 1)).json"
     PREV_SHA=$([ -f "$prev" ] && jq -r '.head_sha' "$prev" || echo "$BASE_SHA")
+    # A /team-sync since the previous review (rebase or merge of the base) would put the base's
+    # own changes into this iteration's diff: measure the iteration from the synced head instead.
+    synced=$(jq -r --argjson p $((n - 1)) '[.syncs[]? | select(.after_review == $p)] | last | .to_head // empty' "$dir/state.json")
+    [ -n "$synced" ] && PREV_SHA=$synced
     prev_files=$(ls "$dir"/reviews/code-*.json 2>/dev/null | grep -v "code-$n.json" | sort -V || true)
     PREV_REVIEWS=$(echo "$prev_files" | tr '\n' ' ')
     # shellcheck disable=SC2086

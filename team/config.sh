@@ -14,6 +14,11 @@ TEAM_MAX_CODE_REVIEWS=${TEAM_MAX_CODE_REVIEWS:-6}
 # to review, as before.
 TEAM_GATE_FIX_ROUNDS=${TEAM_GATE_FIX_ROUNDS:-2}
 
+# Extra code reviews a /team-respond round may use on top of the ones already spent, so a feature
+# whose loop ended (approved or exhausted) can still go through Developer → gates → Reviewer for
+# the PR's comments. The feature's budget is stored as review_budget in state.json.
+TEAM_RESPOND_REVIEWS=${TEAM_RESPOND_REVIEWS:-2}
+
 # Models and reasoning effort. Claude roles take a model alias (opus, sonnet, haiku, fable) and
 # low|medium|high|xhigh|max; they are passed explicitly wherever the skills and workflows spawn
 # an agent, so the session's own model/effort never leaks in. The agent .md frontmatter carries

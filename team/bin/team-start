@@ -18,8 +18,6 @@ set -euo pipefail
 
 # shellcheck source=/dev/null
 . "$HOME/.claude/team/lib.sh"
-max=$TEAM_MAX_CODE_REVIEWS
-
 dir=$(cd "${1:?usage: team-start <feature_dir> [--reset]}" && pwd)
 reset=${2:-}
 state="$dir/state.json"
@@ -27,6 +25,7 @@ state="$dir/state.json"
 fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
 
 [ -f "$state" ] || fail "missing state.json — run team-init first"
+max=$(team_review_budget "$dir")
 main=$(team_main_repo "$dir")
 repo=$(team_worktree "$dir")
 has_wt=$(jq -r 'has("worktree")' "$state")
@@ -75,7 +74,10 @@ if [ "$reset" = "--reset" ]; then
       mv "$path" "$arch/$(dirname "$f")/"
     done
   done
-  perl -0pi -e 's/\n*## Correcciones — revisión \d+.*\z/\n/s' "$dir/tasks.md"
+  # Only the reviewer's sections: a person's PR comments (## Comentarios de la PR) stay as tasks.
+  perl -0pi -e 's/\n*## Correcciones — revisión \d+\n.*?(?=\n## (?!Correcciones — revisión)|\z)/\n/sg; s/\n*\z/\n/' "$dir/tasks.md"
+  team_state_set "$dir" 'del(.review_budget) | del(.respond.pending)'
+  max=$TEAM_MAX_CODE_REVIEWS
 fi
 
 base_sha=$(jq -r '.base_sha // empty' "$state")
@@ -88,9 +90,14 @@ if [ -z "$base_sha" ]; then
 fi
 
 done_iters=$(find "$dir/reviews" -name 'code-*.json' | wc -l | tr -d ' ')
+# An approved loop is finished, unless a /team-respond round added PR comments as tasks after
+# that approval (respond.pending.from_iter is the first iteration of that round).
+respond_from=$(jq -r '.respond.pending.from_iter // empty' "$state")
 finished=false
-if [ "$done_iters" -ge "$max" ] ||
-  { [ "$done_iters" -gt 0 ] && [ "$(jq -r '.verdict' "$dir/reviews/code-$done_iters.json")" = "APPROVED" ]; }; then
+if [ "$done_iters" -ge "$max" ]; then
+  finished=true
+elif [ "$done_iters" -gt 0 ] && [ "$(jq -r '.verdict' "$dir/reviews/code-$done_iters.json")" = "APPROVED" ] &&
+  { [ -z "$respond_from" ] || [ "$done_iters" -ge "$respond_from" ]; }; then
   finished=true
 fi
 jq -n --arg d "$dir" --arg s "$base_sha" --arg b "$branch" --argjson i $((done_iters + 1)) --argjson f $finished \

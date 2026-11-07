@@ -4,7 +4,7 @@
 #   team-status [--json]
 #
 # Per feature: branch, base, plan rounds and verdict, code iterations and verdict, phase
-# (planning | planned | developing | approved | incomplete), unchecked tasks, items for a person,
+# (planning | planned | developing | responding | approved | incomplete), unchecked tasks, items for a person,
 # and the worktree (its path, "-" for features without one, "(removed)" after team-clean).
 # Works from the main checkout or from any of the repo's worktrees.
 set -euo pipefail
@@ -26,8 +26,11 @@ for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
   plan_v=$([ "$plan_n" -gt 0 ] && jq -r .verdict "$dir/reviews/plan-$plan_n.json" || echo "-")
   code_v=$([ "$code_n" -gt 0 ] && jq -r .verdict "$dir/reviews/code-$code_n.json" || echo "-")
 
-  if [ "$code_v" = APPROVED ]; then phase=approved
-  elif [ "$code_n" -ge "$TEAM_MAX_CODE_REVIEWS" ]; then phase=incomplete
+  code_max=$(team_review_budget "$dir")
+  respond_from=$(jq -r '.respond.pending.from_iter // empty' "$state")
+  if [ -n "$respond_from" ] && [ "$code_n" -lt "$respond_from" ] && [ "$code_n" -lt "$code_max" ]; then phase=responding
+  elif [ "$code_v" = APPROVED ]; then phase=approved
+  elif [ "$code_n" -ge "$code_max" ]; then phase=incomplete
   elif [ "$code_n" -gt 0 ]; then phase=developing
   elif [ -s "$dir/tasks.md" ]; then phase=planned
   else phase=planning
@@ -45,13 +48,15 @@ for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
   rows+=("$(jq -n --arg id "$(basename "$dir")" --arg phase "$phase" --arg worktree "$wt" \
     --arg branch "$(jq -r '.branch // "-"' "$state")" --arg base "$(jq -r '.base_ref // "-"' "$state")" \
     --argjson plan_n "$plan_n" --arg plan_v "$plan_v" --argjson plan_max "$TEAM_MAX_PLAN_ROUNDS" \
-    --argjson code_n "$code_n" --arg code_v "$code_v" --argjson code_max "$TEAM_MAX_CODE_REVIEWS" \
+    --argjson code_n "$code_n" --arg code_v "$code_v" --argjson code_max "$code_max" \
     --argjson unchecked "${unchecked:-0}" --argjson manual "$manual" --argjson human "${human:-0}" \
     --argjson final "$([ -f "$dir/final-report.md" ] && echo true || echo false)" \
+    --argjson pr "$(jq '.pr.url // null' "$state")" \
     '{id: $id, phase: $phase, branch: $branch, base: $base, worktree: $worktree,
       plan: {rounds: $plan_n, max: $plan_max, verdict: $plan_v},
       code: {iterations: $code_n, max: $code_max, verdict: $code_v},
-      unchecked_tasks: $unchecked, manual_items: $manual, human_findings: $human, final_report: $final}')")
+      unchecked_tasks: $unchecked, manual_items: $manual, human_findings: $human, final_report: $final,
+      pr: $pr}')")
 done
 
 all=$(printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s .)
@@ -59,12 +64,13 @@ if [ "$json" = "--json" ]; then echo "$all"; exit 0; fi
 
 if [ "$(echo "$all" | jq length)" -eq 0 ]; then echo "No features under $repo/.team"; exit 0; fi
 {
-  echo "FEATURE|FASE|RAMA|PLAN|CÓDIGO|TAREAS ABIERTAS|PARA PERSONA"
+  echo "FEATURE|FASE|RAMA|PLAN|CÓDIGO|TAREAS ABIERTAS|PARA PERSONA|PR"
   echo "$all" | jq -r '.[] | [
       .id, .phase, .branch,
       "\(.plan.rounds)/\(.plan.max) \(.plan.verdict)",
       "\(.code.iterations)/\(.code.max) \(.code.verdict)",
       (.unchecked_tasks | tostring),
-      ((.manual_items + .human_findings) | tostring)
+      ((.manual_items + .human_findings) | tostring),
+      (.pr // "-" | sub(".*/pull/"; "#"))
     ] | join("|")'
 } | column -t -s '|'

@@ -74,6 +74,28 @@ team_with_lock() { # <lockfile> <cmd...>
     flock($f, LOCK_EX) or die "lock: $!\n"; exec { $ARGV[0] } @ARGV or die "exec: $!\n"' "$lock" "$@"
 }
 
+# Code reviews this feature may use: TEAM_MAX_CODE_REVIEWS, or more after a /team-respond round
+# raised it (review_budget in state.json).
+team_review_budget() { # <feature_dir>
+  local b
+  b=$(jq -r '.review_budget // empty' "$1/state.json" 2>/dev/null)
+  if [ -n "$b" ] && [ "$b" -gt "$TEAM_MAX_CODE_REVIEWS" ]; then echo "$b"; else echo "$TEAM_MAX_CODE_REVIEWS"; fi
+}
+
+# Remote and base branch the feature merges into, from base_ref: "origin/main" → "origin main".
+# A local base_ref ("main") maps to origin.
+team_base_remote() { # <feature_dir>
+  local base_ref first
+  base_ref=$(jq -r '.base_ref // empty' "$1/state.json")
+  [ -n "$base_ref" ] || return 1
+  first=${base_ref%%/*}
+  if [ "$first" != "$base_ref" ] && git -C "$(team_main_repo "$1")" remote | grep -qxF "$first"; then
+    echo "$first ${base_ref#*/}"
+  else
+    echo "origin $base_ref"
+  fi
+}
+
 # Update state.json in place with a jq filter.
 team_state_set() { # <feature_dir> <jq filter> [jq args...]
   local state="$1/state.json" filter=$2

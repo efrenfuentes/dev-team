@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Bring a feature branch up to date with its base (base_ref), in the feature's worktree. Prints JSON.
+#
+#   team-sync <feature_dir> start [--rebase|--merge]
+#   team-sync <feature_dir> finish
+#
+# start fetches the base's remote and, if the branch is behind:
+#   - rebases it onto base_ref when the branch was never pushed (history stays linear), or
+#   - merges base_ref into it when the branch is already on the remote, so nothing ever needs a
+#     force push. --rebase on a pushed branch is refused.
+# A rebase that hits conflicts is aborted and redone as a merge, so conflicts are always resolved
+# once, in a single merge commit. On conflicts start stops with status "conflicts" and the merge
+# left in progress: resolve, commit, then run finish. Otherwise it runs finish itself.
+#
+# finish checks the merge is committed, moves base_sha to the new merge base (so reviews diff only
+# the feature), records the sync in state.json (.syncs; team-review measures the next iteration from
+# its to_head), reruns team-setup (the base may bring new dependencies or migrations) and the gates
+# (the Developer's own check, gates/check.*). Never pushes.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+dir=$(cd "${1:?usage: team-sync <feature_dir> start [--rebase|--merge] | finish}" && pwd)
+mode=${2:-}
+want=${3:-}
+state="$dir/state.json"
+
+fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
+
+[ -f "$state" ] || fail "missing state.json"
+wt=$(team_worktree "$dir")
+[ -d "$wt" ] || fail "the worktree $wt is gone — /team-dev NNN recreates it from the branch"
+branch=$(jq -r '.branch // empty' "$state")
+[ -n "$branch" ] || fail "the feature has no branch yet"
+[ "$(git -C "$wt" branch --show-current)" = "$branch" ] || fail "the worktree $wt is not on the feature branch '$branch'"
+base_ref=$(jq -r '.base_ref // empty' "$state")
+[ -n "$base_ref" ] || fail "state.json has no base_ref"
+read -r remote _ <<<"$(team_base_remote "$dir")"
+gitdir=$(git -C "$wt" rev-parse --absolute-git-dir)
+mkdir -p "$dir/logs"
+log="$dir/logs/sync.log"
+
+conflicts() { git -C "$wt" diff --name-only --diff-filter=U; }
+
+finish() {
+  [ -z "$(conflicts)" ] || fail "there are still unresolved conflicts: $(conflicts | tr '\n' ' ')"
+  [ ! -f "$gitdir/MERGE_HEAD" ] || fail "the merge is resolved but not committed — git -C $wt commit --no-edit"
+  [ ! -d "$gitdir/rebase-merge" ] && [ ! -d "$gitdir/rebase-apply" ] || fail "a rebase is in progress in $wt"
+  [ -z "$(git -C "$wt" status --porcelain --untracked-files=normal)" ] || fail "the worktree has uncommitted changes"
+
+  local pending new_base head setup gates
+  pending=$(jq -c '.sync_pending // {}' "$state")
+  new_base=$(git -C "$wt" merge-base HEAD "$base_ref")
+  head=$(git -C "$wt" rev-parse HEAD)
+  team_state_set "$dir" '
+    .syncs = ((.syncs // []) + [$p + {to_head: $h, base_sha: $b, finished: $t}])
+    | .base_sha = $b | del(.sync_pending)' \
+    --argjson p "$pending" --arg h "$head" --arg b "$new_base" --arg t "$(date -u +%FT%TZ)"
+
+  setup='{"ok": true, "skipped": "no worktree"}'
+  if jq -e 'has("worktree")' "$state" >/dev/null; then
+    setup=$("$TEAM/bin/team-setup" "$dir" 2>/dev/null | jq -sc 'last // {ok: false}' 2>/dev/null)
+    [ -n "$setup" ] || setup='{"ok": false}'
+  fi
+  gates=$("$TEAM/bin/team-gates" "$dir" | jq -sc 'last // {passed: false}' 2>/dev/null)
+  [ -n "$gates" ] || gates='{"passed": false}'
+
+  jq -n --arg d "$dir" --argjson p "$pending" --arg h "$head" --arg b "$new_base" \
+    --argjson setup "$setup" --argjson gates "$gates" --arg log "$log" '
+    {ok: true, feature_dir: $d, status: "synced", strategy: $p.strategy, behind: $p.behind,
+     conflicted: ($p.conflicted // false), head: $h, base_sha: $b, pushed_branch: $p.pushed,
+     setup: $setup, gates: $gates, log: $log}'
+  exit 0
+}
+
+case "$mode" in
+  finish)
+    jq -e '.sync_pending' "$state" >/dev/null || fail "no sync in progress — run team-sync start"
+    finish ;;
+  start) ;;
+  *) fail "mode must be start or finish" ;;
+esac
+
+case "$want" in "" | --rebase | --merge) ;; *) fail "unknown option: $want" ;; esac
+[ ! -f "$gitdir/MERGE_HEAD" ] && [ ! -d "$gitdir/rebase-merge" ] && [ ! -d "$gitdir/rebase-apply" ] ||
+  fail "a merge or rebase is already in progress in $wt — finish it (team-sync finish) or abort it"
+dirty=$(git -C "$wt" status --porcelain --untracked-files=normal)
+[ -z "$dirty" ] || fail "the worktree has uncommitted changes — commit or stash first: $(echo "$dirty" | head -5 | tr '\n' ' ')"
+
+if [ "${base_ref#"$remote"/}" != "$base_ref" ]; then
+  git -C "$wt" fetch --quiet "$remote" >"$log" 2>&1 || fail "git fetch $remote failed — see $log"
+fi
+git -C "$wt" rev-parse -q --verify "$base_ref^{commit}" >/dev/null || fail "unknown base ref: $base_ref"
+
+behind=$(git -C "$wt" rev-list --count "HEAD..$base_ref")
+if [ "$behind" -eq 0 ]; then
+  jq -n --arg d "$dir" --arg b "$base_ref" '{ok: true, feature_dir: $d, status: "up_to_date", base_ref: $b}'
+  exit 0
+fi
+
+pushed=false
+git -C "$wt" rev-parse -q --verify "refs/remotes/$remote/$branch" >/dev/null && pushed=true
+strategy=${want#--}
+if [ -z "$strategy" ]; then strategy=$([ "$pushed" = true ] && echo merge || echo rebase); fi
+[ "$strategy" = rebase ] && [ "$pushed" = true ] &&
+  fail "branch '$branch' is already on $remote: a rebase would need a force push — use --merge"
+
+done_reviews=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | wc -l | tr -d ' ')
+from_head=$(git -C "$wt" rev-parse HEAD)
+conflicted=false
+
+if [ "$strategy" = rebase ]; then
+  if ! git -C "$wt" rebase "$base_ref" >>"$log" 2>&1; then
+    git -C "$wt" rebase --abort >>"$log" 2>&1
+    echo "== rebase hit conflicts; redoing as a merge" >>"$log"
+    strategy=merge
+    conflicted=true
+  fi
+fi
+
+team_state_set "$dir" '.sync_pending = {strategy: $s, behind: $n, from_head: $f, base_sha_before: .base_sha,
+    after_review: $r, pushed: $p, conflicted: $c, started: $t}' \
+  --arg s "$strategy" --argjson n "$behind" --arg f "$from_head" --argjson r "$done_reviews" \
+  --argjson p "$pushed" --argjson c "$conflicted" --arg t "$(date -u +%FT%TZ)"
+
+if [ "$strategy" = merge ] && ! git -C "$wt" merge --no-edit "$base_ref" >>"$log" 2>&1; then
+  files=$(conflicts)
+  if [ -z "$files" ]; then
+    git -C "$wt" merge --abort >>"$log" 2>&1
+    team_state_set "$dir" 'del(.sync_pending)'
+    fail "git merge failed without conflicts — see $log"
+  fi
+  team_state_set "$dir" '.sync_pending.conflicted = true'
+  jq -n --arg d "$dir" --arg w "$wt" --arg b "$base_ref" --argjson n "$behind" --arg log "$log" \
+    --argjson files "$(echo "$files" | jq -R . | jq -s .)" '
+    {ok: true, feature_dir: $d, status: "conflicts", strategy: "merge", base_ref: $b, behind: $n,
+     worktree: $w, files: $files, log: $log}'
+  exit 0
+fi
+
+finish

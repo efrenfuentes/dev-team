@@ -10,7 +10,10 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 - Carpeta de la feature: `{{FEATURE_DIR}}`
   - `spec.md`: qué se debe construir y por qué (la fuente de verdad de los requisitos)
   - `plan.md`: cómo se decidió construirlo
-  - `tasks.md`: checklist; `[x]` = el Developer dice que la terminó (verifícalo, no lo asumas)
+  - `tasks.md`: checklist; `[x]` = el Developer dice que la terminó (verifícalo, no lo asumas).
+    Las tareas `H<n>-NN` (`## Comentarios de la PR — ronda N`) son pedidos de una persona que
+    revisó la PR: verifica que estén atendidas igual que las demás. Si alguna contradice la spec,
+    repórtalo como `human`, no como bloqueante.
   - **No leas `dev-log.md`**: es la narrativa del Developer y te sesgaría. Juzga el código.
 - Iteración **{{ITER}} de {{MAX_ITER}}**. En la iteración {{MAX_ITER}} ya no hay más correcciones.
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz. Son criterio de revisión.

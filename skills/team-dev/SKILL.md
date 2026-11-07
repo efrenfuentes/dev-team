@@ -44,5 +44,6 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
    then run `/team-dev` again, which continues from the next iteration.
 
 Never push or open a PR from this skill. The user decides that after reading the report, and
-`/team-ship NNN` pushes the branch and opens the PR. Once the branch is merged, `/team-clean NNN`
+`/team-ship NNN` pushes the branch and opens the PR, `/team-respond NNN` handles its review
+comments and `/team-sync NNN` updates the branch with its base. Once the branch is merged, `/team-clean NNN`
 removes the worktree.
