@@ -2,6 +2,8 @@
 # Run the repo's automatic gates (tests + lint) in the feature's worktree.
 #
 #   team-gates <feature_dir> <iter>   # the official run after an iteration → gates/iter-N.{log,json}
+#                                     # (a rerun after a gate repair keeps the earlier run as
+#                                     #  gates/iter-N-try-K.{log,json}; iter-N.* is always the latest)
 #   team-gates <feature_dir>          # the Developer's own check before committing → gates/check.{log,json}
 #
 # Gate script lookup: <main>/.team/gates.sh, then ~/.claude/team/gates/<repo-name>.sh.
@@ -23,6 +25,12 @@ name=$([ -n "$iter" ] && echo "iter-$iter" || echo check)
 log="$dir/gates/$name.log"
 json="$dir/gates/$name.json"
 mkdir -p "$dir/gates"
+if [ -n "$iter" ] && [ -f "$json" ]; then
+  k=$(find "$dir/gates" -name "iter-$iter-try-*.json" | wc -l | tr -d ' ')
+  k=$((k + 1))
+  mv "$json" "$dir/gates/iter-$iter-try-$k.json"
+  [ -f "$log" ] && mv "$log" "$dir/gates/iter-$iter-try-$k.log"
+fi
 script=$(team_project_script gates "$dir" || true)
 
 if [ -z "$script" ]; then

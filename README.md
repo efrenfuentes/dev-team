@@ -22,7 +22,7 @@ git clone <url-de-este-repo> ~/Developer/dev-team
 
 ```
 ~/.claude/agents/team-{planner,developer,runner}.md  →  agents/
-~/.claude/skills/team-plan, team-dev, team-status, team-clean  →  skills/
+~/.claude/skills/team-plan, team-dev, team-status, team-ship, team-clean  →  skills/
 ~/.claude/team                                       →  team/
 ```
 
@@ -42,6 +42,7 @@ Reinicia Claude Code después de instalar.
 - **Codex CLI** con sesión iniciada (`brew install codex` y luego `codex login`) y acceso a
   `gpt-6-astra`. Si tu login de Codex no está en `~/.codex`, define `TEAM_CODEX_HOME`.
 - **jq**, **perl** y **git** (`brew install jq`; perl ya viene en macOS).
+- **gh** (GitHub CLI) con sesión iniciada, solo para `/team-ship`.
 - Las herramientas que usen los gates de cada proyecto (compilador, test runner, linter).
 
 ## Uso
@@ -62,9 +63,15 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    requiere a una persona.
 4. **`/team-dev [NNN] [--reset]`**
    Repite el ciclo Developer → gates → Reviewer hasta que el Reviewer aprueba, con un máximo de
-   6 revisiones (la implementación inicial más 5 rondas de corrección). Al final escribe
-   `final-report.md`. Nunca hace push ni abre PRs.
-5. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
+   6 revisiones (la implementación inicial más 5 rondas de corrección). Si los gates fallan
+   después de una iteración, el Developer tiene hasta 2 rondas para arreglarlos antes de que
+   revise el Reviewer (ver [Reparación de gates](#reparación-de-gates)). Al final escribe
+   `final-report.md`. Nunca hace push ni abre PRs: eso es `/team-ship`.
+5. **`/team-ship NNN [--draft]`**, cuando decides publicarla: hace push de la rama y abre la PR
+   con `gh` hacia la rama base. Antes te muestra el título, el estado del ciclo y el cuerpo
+   (`.team/NNN-slug/pr-body.md`, que puedes editar) y pide confirmación. Si el Reviewer no
+   aprobó, recomienda abrirla como borrador. Ver [Publicar la feature](#publicar-la-feature).
+6. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
    worktree y la base de datos de test de la feature. La rama y `.team/NNN-slug/` se conservan.
 
 Puedes tener varias features a la vez: planifica una mientras otra está en `/team-dev`, o corre
@@ -105,6 +112,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_REVIEW_MODEL` / `TEAM_REVIEW_EFFORT` | `gpt-6-astra` / `high` |
 | `TEAM_MAX_PLAN_ROUNDS` | `5` |
 | `TEAM_MAX_CODE_REVIEWS` | `6` |
+| `TEAM_GATE_FIX_ROUNDS` | `2` (0 manda los gates en rojo directo a revisión) |
 | `TEAM_SECURITY_REVIEW` | `1` (0 la desactiva) |
 | `TEAM_WORKTREES` | `1` (0 trabaja en el checkout actual, como antes) |
 | `TEAM_WORKTREE_ROOT` | `../<repo>.worktrees` |
@@ -149,6 +157,35 @@ make test || status=1
 echo "== result: $([ $status -eq 0 ] && echo PASSED || echo FAILED) =="
 exit $status
 ```
+
+### Reparación de gates
+
+Si los gates fallan después de una iteración del Developer, el ciclo no llama todavía al
+Reviewer: una revisión con los gates en rojo solo diría "haz pasar los gates". En cambio, el
+Developer recibe el log y hace hasta `TEAM_GATE_FIX_ROUNDS` rondas cortas en las que solo arregla
+lo que reportan los gates (sin tareas nuevas ni refactors), hace commit y los gates corren otra
+vez. La revisión llega cuando pasan, o cuando se acaban las rondas, el Developer no hace commits
+o reporta un bloqueo (por ejemplo, un test que ya fallaba antes de la feature). En ese caso el
+Reviewer igual marca los gates como bloqueante.
+
+Las rondas de reparación no cuentan como revisiones. `gates/iter-N.*` es siempre la última
+corrida de la iteración, y las anteriores quedan como `gates/iter-N-try-K.*`. Cada reparación
+deja su sección en `dev-log.md`.
+
+## Publicar la feature
+
+`/team-ship NNN` (script: `~/.claude/team/bin/team-ship`) publica una feature en dos pasos:
+
+1. `--check` verifica que el worktree esté limpio, que la rama tenga commits sobre la base y que
+   `gh` tenga sesión iniciada. Si no existe, escribe `.team/NNN-slug/pr-body.md` con el resumen y
+   lo implementado (sacados de `final-report.md`), una checklist con lo que debe verificar una
+   persona y la lista de commits. No sobrescribe un `pr-body.md` que ya editaste.
+2. Después de que confirmas, `--push` hace `git push -u` (nunca forzado) y `gh pr create` hacia
+   la rama de `base_ref` (`origin/main` → `main`). Si la rama ya tiene una PR abierta, solo hace
+   push, y la PR se actualiza sola. La URL queda en `state.json` como `.pr`.
+
+Requiere [`gh`](https://cli.github.com/) con sesión iniciada (`gh auth login`). Nunca fusiona la
+PR, ni borra la rama, ni pide reviewers.
 
 ## Worktrees
 

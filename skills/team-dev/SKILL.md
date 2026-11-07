@@ -29,8 +29,9 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
 
 3. **Run the workflow.** Call the Workflow tool with
    `scriptPath: ~/.claude/team/dev-team.js` (expand `~` to the absolute home path) and
-   `args: { feature_dir: DIR, worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>, max_iter: <max_iter>, developer: <developer object from ~/.claude/team/bin/team-config> }`.
-   Pass the `developer` object exactly as printed: it holds the model and effort the user chose.
+   `args: { feature_dir: DIR, worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>, max_iter: <max_iter>, developer: <developer object from ~/.claude/team/bin/team-config>, gate_fix_rounds: <gate_fix_rounds from team-config> }`.
+   Pass the `developer` object and `gate_fix_rounds` exactly as printed: they hold the model,
+   effort and gate-repair limit the user chose.
    It runs in the background; tell the user they can follow it in `/workflows`.
 
 4. **When it completes**, read `DIR/final-report.md` and give the user:
@@ -42,5 +43,6 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
    If the workflow stopped early (`stopped_early`), say why and how to resume: fix the cause,
    then run `/team-dev` again, which continues from the next iteration.
 
-Never push or open a PR from this skill. The user decides that after reading the report. Once
-the branch is merged, `/team-clean NNN` removes the worktree.
+Never push or open a PR from this skill. The user decides that after reading the report, and
+`/team-ship NNN` pushes the branch and opens the PR. Once the branch is merged, `/team-clean NNN`
+removes the worktree.

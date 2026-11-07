@@ -8,6 +8,12 @@ TEAM_MAX_PLAN_ROUNDS=${TEAM_MAX_PLAN_ROUNDS:-5}
 # follows a correction round, so corrections = TEAM_MAX_CODE_REVIEWS - 1.
 TEAM_MAX_CODE_REVIEWS=${TEAM_MAX_CODE_REVIEWS:-6}
 
+# Gate repair rounds per iteration: when the official gates fail after a Developer iteration, the
+# Developer gets up to this many rounds to fix just the gates (and the gates run again) before the
+# Reviewer is called, so a code review is not spent on a red build. 0 sends a red build straight
+# to review, as before.
+TEAM_GATE_FIX_ROUNDS=${TEAM_GATE_FIX_ROUNDS:-2}
+
 # Models and reasoning effort. Claude roles take a model alias (opus, sonnet, haiku, fable) and
 # low|medium|high|xhigh|max; they are passed explicitly wherever the skills and workflows spawn
 # an agent, so the session's own model/effort never leaks in. The agent .md frontmatter carries

@@ -10,7 +10,8 @@ Markdown, sin preámbulo) se guardará tal cual como `final-report.md`.
   - `incomplete`: se agotaron las iteraciones sin tu aprobación.
 - Cambios: `git log --oneline {{BASE_SHA}}..{{HEAD_SHA}}` y `git diff --stat {{BASE_SHA}}..{{HEAD_SHA}}`
 - Revisiones (JSON, una por iteración): {{PREV_REVIEWS}}
-- Gates automáticos: `{{FEATURE_DIR}}/gates/iter-*.json` y `.log`
+- Gates automáticos: `{{FEATURE_DIR}}/gates/iter-N.json` y `.log` (la corrida oficial final de cada
+  iteración; `iter-N-try-K.*` son corridas anteriores que fallaron antes de una reparación de gates)
 
 ## Estructura del informe
 

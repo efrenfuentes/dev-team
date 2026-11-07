@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Push a feature's branch and open its pull request with gh. Prints JSON.
+#
+#   team-ship <feature_dir> --check                      # preflight; writes pr-body.md if missing; pushes nothing
+#   team-ship <feature_dir> --push [--draft] [--title T] # push the branch, open the PR (or update the open one)
+#
+# The PR goes from the feature branch to the base branch of base_ref (origin/main → main on
+# origin). Its body is <feature_dir>/pr-body.md: --check writes a draft from final-report.md,
+# spec.md and the commits, and never overwrites one that already exists, so it can be edited
+# before --push. The title defaults to the spec's first heading.
+#
+# Refuses a worktree with uncommitted changes (they would not be in the PR) and a branch with no
+# commits over the base. Never force-pushes. If the branch already has an open PR, --push only
+# pushes (which updates that PR) and reports it.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+dir=$(cd "${1:?usage: team-ship <feature_dir> --check | --push [--draft] [--title T]}" && pwd)
+mode=${2:-}
+shift 2 2>/dev/null || shift $#
+draft=false
+title=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --draft) draft=true ;;
+    --title) title=${2:-}; shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+fail() { jq -n --arg e "$1" --arg d "$dir" '{ok: false, feature_dir: $d, error: $e}'; exit 1; }
+
+case "$mode" in --check | --push) ;; *) fail "mode must be --check or --push" ;; esac
+state="$dir/state.json"
+[ -f "$state" ] || fail "missing state.json"
+main=$(team_main_repo "$dir") || fail "not inside a git repository"
+cd "$main" || exit 1
+
+branch=$(jq -r '.branch // empty' "$state")
+[ -n "$branch" ] || fail "the feature has no branch yet — run /team-dev first"
+git show-ref --verify -q "refs/heads/$branch" || fail "branch '$branch' does not exist"
+case "$branch" in main | master | develop) fail "refusing to ship the protected branch '$branch'" ;; esac
+
+# Uncommitted work in the worktree would silently stay out of the PR.
+wt=$(jq -r '.worktree // empty' "$state")
+if [ -n "$wt" ] && [ -d "$wt" ]; then
+  dirty=$(git -C "$wt" status --porcelain --untracked-files=normal)
+  [ -z "$dirty" ] || fail "the worktree has uncommitted changes — commit or discard them first: $(echo "$dirty" | head -5 | tr '\n' ' ')"
+fi
+
+# base_ref "origin/main" → remote origin, base branch main. A local base ("main") ships to origin.
+base_ref=$(jq -r '.base_ref // empty' "$state")
+[ -n "$base_ref" ] || fail "state.json has no base_ref"
+remote=origin
+base=$base_ref
+first=${base_ref%%/*}
+if [ "$first" != "$base_ref" ] && git remote | grep -qxF "$first"; then
+  remote=$first
+  base=${base_ref#*/}
+fi
+git remote get-url "$remote" >/dev/null 2>&1 || fail "no git remote '$remote'"
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed"
+gh auth status >/dev/null 2>&1 || fail "gh is not authenticated — run: gh auth login"
+
+base_sha=$(jq -r '.base_sha // empty' "$state")
+[ -n "$base_sha" ] || base_sha=$(git merge-base "$branch" "$base_ref" 2>/dev/null || true)
+[ -n "$base_sha" ] || fail "cannot find the merge base of $branch and $base_ref"
+commits=$(git rev-list --count "$base_sha..$branch")
+[ "$commits" -gt 0 ] || fail "branch '$branch' has no commits over $base_ref"
+
+# Where the dev loop ended: approved, incomplete (reviews used up), developing, or not run.
+code_n=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$code_n" -eq 0 ]; then status=not_reviewed
+elif [ "$(jq -r .verdict "$dir/reviews/code-$code_n.json")" = APPROVED ]; then status=approved
+elif [ "$code_n" -ge "$TEAM_MAX_CODE_REVIEWS" ]; then status=incomplete
+else status=developing
+fi
+
+[ -n "$title" ] || title=$(grep -m1 '^# ' "$dir/spec.md" 2>/dev/null | sed 's/^# *//')
+[ -n "$title" ] || title=$(jq -r '.feature' "$state")
+
+existing=$(gh pr list --head "$branch" --state open --json number,url,isDraft --limit 1 2>/dev/null | jq -c '.[0] // null')
+[ -n "$existing" ] || existing=null
+
+# Body of one "## <heading>" section of a Markdown file (up to the next "## ").
+section() { # <file> <heading prefix>
+  [ -f "$1" ] || return 0
+  H="$2" perl -ne 'if (/^## /) { $in = (index($_, "## $ENV{H}") == 0); next } print if $in' "$1" |
+    perl -0pe 's/\A\s+//; s/\s+\z/\n/'
+}
+
+body="$dir/pr-body.md"
+if [ ! -f "$body" ]; then
+  summary=$(section "$dir/final-report.md" "Resumen")
+  [ -n "$summary" ] || summary=$(section "$dir/spec.md" "Contexto y objetivo")
+  built=$(section "$dir/final-report.md" "Qué se implementó")
+  # Everything a person still has to do becomes a checklist for the PR.
+  manual=$( { section "$dir/final-report.md" "Pendiente para una persona"; section "$dir/tasks.md" "Verificación manual"; } |
+    perl -ne 'print if s/^\s*[-*] (\[[ x]\] )?/- [ ] /')
+  {
+    echo "## Resumen"; echo; echo "${summary:-_Sin resumen._}"; echo
+    if [ -n "$built" ]; then echo "## Qué se implementó"; echo; echo "$built"; echo; fi
+    if [ -n "$manual" ]; then echo "## Verificación manual pendiente"; echo; echo "$manual"; echo; fi
+    echo "## Commits"; echo
+    git log --reverse --format='- %h %s' "$base_sha..$branch"; echo
+    case "$status" in
+      approved) echo "_Aprobado por el Reviewer tras $code_n iteración(es)._" ;;
+      incomplete) echo "_⚠️ El ciclo terminó **sin aprobación** del Reviewer ($code_n/$TEAM_MAX_CODE_REVIEWS revisiones). Ver los pendientes antes de fusionar._" ;;
+      developing) echo "_⚠️ El ciclo de desarrollo no terminó ($code_n revisiones; la última pidió cambios)._" ;;
+      not_reviewed) echo "_⚠️ Este código no pasó por el Reviewer._" ;;
+    esac
+  } >"$body"
+fi
+
+summary_json() { # <extra jq object>
+  jq -n --arg d "$dir" --arg b "$branch" --arg r "$remote" --arg base "$base" --argjson c "$commits" \
+    --arg s "$status" --argjson n "$code_n" --arg t "$title" --arg body "$body" --argjson pr "$existing" \
+    --argjson extra "$1" '
+    {ok: true, feature_dir: $d, branch: $b, remote: $r, base: $base, commits: $c,
+     status: $s, code_reviews: $n, title: $t, body: $body, existing_pr: $pr} + $extra'
+}
+
+if [ "$mode" = --check ]; then
+  summary_json '{}'
+  exit 0
+fi
+
+mkdir -p "$dir/logs"
+log="$dir/logs/ship.log"
+git push -u "$remote" "$branch" >"$log" 2>&1 || fail "git push failed (not forced) — see $log"
+
+if [ "$existing" != null ]; then
+  url=$(echo "$existing" | jq -r .url)
+  created=false
+else
+  args=(pr create --base "$base" --head "$branch" --title "$title" --body-file "$body")
+  [ "$draft" = true ] && args+=(--draft)
+  url=$(gh "${args[@]}" 2>>"$log" | tail -1)
+  [ -n "$url" ] || fail "gh pr create failed — see $log"
+  created=true
+fi
+
+team_state_set "$dir" '.pr = {url: $u, shipped: $t}' --arg u "$url" --arg t "$(date -u +%FT%TZ)"
+summary_json "$(jq -n --arg u "$url" --argjson c "$created" --argjson dr "$draft" '{pr_url: $u, pr_created: $c, draft: (if $c then $dr else null end)}')"

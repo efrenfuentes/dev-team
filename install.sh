@@ -59,6 +59,7 @@ check_deps() {
       printf '  ✗ %s (falta)\n' "$cmd"; missing=1
     fi
   done
+  command -v gh >/dev/null 2>&1 || echo "  - gh (opcional: solo /team-ship lo usa para abrir PRs)"
   codex_home="${TEAM_CODEX_HOME:-$HOME/.codex}"
   if command -v codex >/dev/null 2>&1 && [ ! -f "$codex_home/auth.json" ]; then
     echo "  ! Codex no parece tener sesión iniciada en $codex_home: corre 'codex login'"

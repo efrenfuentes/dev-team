@@ -2,7 +2,7 @@
 # Print the team configuration as JSON, plus where a feature's plan loop would resume.
 #
 #   team-config [feature_dir]
-#   → {max_plan_rounds, max_code_reviews, planner: {model, effort}, developer: {model, effort},
+#   → {max_plan_rounds, max_code_reviews, gate_fix_rounds, planner: {model, effort}, developer: {model, effort},
 #      reviewer: {model, effort}, next_plan_round?, plan_approved?}
 set -euo pipefail
 
@@ -10,11 +10,11 @@ set -euo pipefail
 . "$HOME/.claude/team/config.sh"
 
 base=$(jq -n \
-  --argjson p "$TEAM_MAX_PLAN_ROUNDS" --argjson c "$TEAM_MAX_CODE_REVIEWS" \
+  --argjson p "$TEAM_MAX_PLAN_ROUNDS" --argjson c "$TEAM_MAX_CODE_REVIEWS" --argjson g "$TEAM_GATE_FIX_ROUNDS" \
   --arg pm "$TEAM_PLANNER_MODEL" --arg pe "$TEAM_PLANNER_EFFORT" \
   --arg dm "$TEAM_DEVELOPER_MODEL" --arg de "$TEAM_DEVELOPER_EFFORT" \
   --arg rm "$TEAM_REVIEW_MODEL" --arg re "$TEAM_REVIEW_EFFORT" \
-  '{max_plan_rounds: $p, max_code_reviews: $c,
+  '{max_plan_rounds: $p, max_code_reviews: $c, gate_fix_rounds: $g,
     planner: {model: $pm, effort: $pe}, developer: {model: $dm, effort: $de},
     reviewer: {model: $rm, effort: $re}}')
 
