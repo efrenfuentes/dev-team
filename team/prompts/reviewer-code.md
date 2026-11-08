@@ -60,8 +60,11 @@ aparecer en `previous_findings` con su estado tras esta iteración:
 - `minor`: estilo, nombres, mejoras opcionales. **No bloquean** y no generan tareas.
 - `human`: algo que **solo una persona puede hacer** (prueba manual con un cliente real, abrir o
   anotar la PR, configurar un entorno externo, decidir producto). **No bloquea** la aprobación ni
-  genera tareas al Developer; va al informe para que la persona lo haga. Si una tarea de
-  tasks.md pide eso, no la cuentes como tarea pendiente del Developer: repórtala como `human`.
+  genera tareas al Developer; va al informe para que la persona lo haga. Si una tarea `T…` o
+  `R…` de tasks.md pide eso, no la cuentes como tarea pendiente del Developer: repórtala como
+  `human`. Lo que ya está en `## Verificación manual (persona)` de tasks.md **no** se reporta:
+  la persona ya lo tiene y el informe final lo incluye. Tampoco repitas un `human` que ya
+  reportaste en una revisión anterior: reporta solo lo nuevo.
 
 ## Reglas de convergencia (importantes)
 

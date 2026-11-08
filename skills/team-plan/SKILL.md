@@ -48,6 +48,10 @@ explicitly asked for these settings.
    true, skip to step 6. Otherwise call the Workflow tool with
    `scriptPath: ~/.claude/team/plan-review.js` (expand `~` to the absolute home path) and
    `args: { feature_dir: DIR, team_bin: <absolute path of ~/.claude/team/bin>, max_rounds: <max_plan_rounds>, start_round: <next_plan_round>, planner: <planner object> }`.
+   The Workflow tool only loads a `scriptPath` it can read: from a project outside this team's
+   repo it refuses `~/.claude/team/…`. If it does, read the script (`cat` the resolved path
+   `readlink -f ~/.claude/team/plan-review.js`) and pass its full contents as `script` instead, with the
+   same `args`.
    The workflow owns the Reviewer ↔ Planner loop and its limit. Do not run review rounds or
    planner revisions yourself, before or after it. Tell the user they can follow it in
    `/workflows`, and wait for it to complete. If it stopped early, report why; running

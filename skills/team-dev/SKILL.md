@@ -30,6 +30,10 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
 3. **Run the workflow.** Call the Workflow tool with
    `scriptPath: ~/.claude/team/dev-team.js` (expand `~` to the absolute home path) and
    `args: { feature_dir: DIR, worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>, max_iter: <max_iter>, developer: <developer object from ~/.claude/team/bin/team-config>, gate_fix_rounds: <gate_fix_rounds from team-config> }`.
+   The Workflow tool only loads a `scriptPath` it can read: from a project outside this team's
+   repo it refuses `~/.claude/team/…`. If it does, read the script (`cat` the resolved path
+   `readlink -f ~/.claude/team/dev-team.js`) and pass its full contents as `script` instead, with the
+   same `args`.
    Pass the `developer` object and `gate_fix_rounds` exactly as printed: they hold the model,
    effort and gate-repair limit the user chose.
    It runs in the background; tell the user they can follow it in `/workflows`.

@@ -42,7 +42,11 @@ comments. Pushing and posting on the PR are outward-facing: confirm each with th
    `scriptPath: ~/.claude/team/dev-team.js` (expand `~`) and `args: { feature_dir: DIR,
    worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>,
    max_iter: <max_iter>, developer: <developer object>, gate_fix_rounds: <gate_fix_rounds>,
-   respond: { round: N } }`, passing the team-config values exactly as printed. Tell the user they
+   respond: { round: N } }`, passing the team-config values exactly as printed.
+   The Workflow tool only loads a `scriptPath` it can read: from a project outside this team's
+   repo it refuses `~/.claude/team/…`. If it does, read the script (`cat` the resolved path
+   `readlink -f ~/.claude/team/dev-team.js`) and pass its full contents as `script` instead, with the
+   same `args`. Tell the user they
    can follow it in `/workflows`, and wait for it.
    If it ends without approval (`approved: false`) or stopped early, report why and what is
    still open (`DIR/final-report.md`), and ask whether to push and reply anyway or stop there.

@@ -33,7 +33,8 @@ sync() { run --separate-stderr "$BIN/team-sync" "$DIR" "$@"; }
     '[true,"origin","main",1,"approved","Feature de prueba",null]' ]
   body=$(cat "$DIR/pr-body.md")
   [[ "$body" == *"Se agregó el export."* ]]
-  [[ "$body" == *"- [ ] Probar con un archivo real"*"- [ ] Revisar en Excel"* ]]
+  [[ "$body" == *"- [ ] Probar con un archivo real"* ]]
+  [[ "$body" != *"Revisar en Excel"* ]]   # tasks.md's checks are only the fallback
   [[ "$body" == *"feat(x): export csv"* ]]
   [[ "$body" == *"Aprobado por el Reviewer"* ]]
   [[ "$body" != *"nada"* ]]
@@ -41,6 +42,31 @@ sync() { run --separate-stderr "$BIN/team-sync" "$DIR" "$@"; }
   echo "mío" >"$DIR/pr-body.md"
   ship --check
   [ "$(cat "$DIR/pr-body.md")" = "mío" ]
+}
+
+@test "ship joins wrapped and numbered checklist items and strips local paths" {
+  commit_file "$WT" a.txt 1 "feat: a"
+  write_review 1 APPROVED
+  printf '%s\n' '## Resumen' "Ver [router.ex]($WT/lib/router.ex) y $DIR/spec.md." \
+    '## Pendiente para una persona' '' \
+    '1. **Antes de fusionar:** arrancar el servidor y probar' '   el ciclo completo con curl.' \
+    '2. Confirmar en la PR que es público.' '' 'Además, un párrafo suelto.' '## Otra' >"$DIR/final-report.md"
+  printf '%s\n' '## Verificación manual (persona)' '- Algo de tasks.md' >"$DIR/tasks.md"
+  ship --check
+  body=$(cat "$DIR/pr-body.md")
+  [[ "$body" == *"- [ ] **Antes de fusionar:** arrancar el servidor y probar el ciclo completo con curl."* ]]
+  [[ "$body" == *"- [ ] Confirmar en la PR que es público."* ]]
+  [[ "$body" != *"párrafo suelto"* ]]
+  [[ "$body" != *"Algo de tasks.md"* ]]          # the report already covers tasks.md
+  [[ "$body" == *"Ver router.ex y .team/001-demo/spec.md."* ]]
+  [[ "$body" != *"$W"* ]]
+}
+
+@test "ship falls back to tasks.md's manual checks without a final report" {
+  commit_file "$WT" a.txt 1 "feat: a"
+  printf '%s\n' '## Verificación manual (persona)' '' '- Probar con un cliente' '  real y largo.' >"$DIR/tasks.md"
+  ship --check
+  grep -qxF -- '- [ ] Probar con un cliente real y largo.' "$DIR/pr-body.md"
 }
 
 @test "ship marks an unapproved cycle in the body" {

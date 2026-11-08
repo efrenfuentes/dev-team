@@ -88,14 +88,24 @@ section() { # <file> <heading prefix>
     perl -0pe 's/\A\s+//; s/\s+\z/\n/'
 }
 
+checklist() {
+  perl -ne '
+    if (/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)/) { print "$cur\n" if defined $cur; $cur = "- [ ] $1"; next }
+    if (defined $cur && /^\s+(\S.*?)\s*$/) { $cur .= " $1"; next }
+    if (defined $cur) { print "$cur\n"; undef $cur }
+    END { print "$cur\n" if defined $cur }'
+}
+
 body="$dir/pr-body.md"
 if [ ! -f "$body" ]; then
   summary=$(section "$dir/final-report.md" "Resumen")
   [ -n "$summary" ] || summary=$(section "$dir/spec.md" "Contexto y objetivo")
   built=$(section "$dir/final-report.md" "Qué se implementó")
-  # Everything a person still has to do becomes a checklist for the PR.
-  manual=$( { section "$dir/final-report.md" "Pendiente para una persona"; section "$dir/tasks.md" "Verificación manual"; } |
-    perl -ne 'print if s/^\s*[-*] (\[[ x]\] )?/- [ ] /')
+  # Everything a person still has to do becomes a checklist for the PR. The final report's section
+  # already folds in tasks.md's manual checks; tasks.md is the fallback without a report. Items may
+  # be bullets or numbered, and wrap over indented lines, which are joined into one checkbox.
+  manual=$(section "$dir/final-report.md" "Pendiente para una persona" | checklist)
+  [ -n "$manual" ] || manual=$(section "$dir/tasks.md" "Verificación manual" | checklist)
   {
     echo "## Resumen"; echo; echo "${summary:-_Sin resumen._}"; echo
     if [ -n "$built" ]; then echo "## Qué se implementó"; echo; echo "$built"; echo; fi
@@ -109,6 +119,11 @@ if [ ! -f "$body" ]; then
       not_reviewed) echo "_⚠️ Este código no pasó por el Reviewer._" ;;
     esac
   } >"$body"
+  # The reports are written for this machine: links to local files and absolute paths into the
+  # worktree or the main checkout mean nothing on GitHub (and expose the local layout).
+  WT_PATH="${wt:-}" MAIN_PATH="$main" perl -pi -e '
+    s{\[([^\]]*)\]\((?:file://)?/[^)\s]*\)}{$1}g;
+    for my $p (grep { length } $ENV{WT_PATH}, $ENV{MAIN_PATH}) { s{\Q$p\E/}{}g }' "$body"
 fi
 
 summary_json() { # <extra jq object>

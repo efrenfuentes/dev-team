@@ -11,7 +11,7 @@ while [ $# -gt 0 ]; do
 done
 prompt=$(cat)
 if grep -q 'Reviewer de seguridad' <<<"$prompt"; then kind=security
-elif grep -q 'informe final' <<<"$prompt"; then kind=final
+elif grep -qF 'emitir el **informe final**' <<<"$prompt"; then kind=final
 elif grep -q 'Ronda de revisión del plan' <<<"$prompt"; then kind=plan
 else kind=code
 fi
