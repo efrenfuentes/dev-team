@@ -11,7 +11,7 @@ export const meta = {
 
 // args: { feature_dir, team_bin, worktree + max_iter + start_iter (from team-start),
 //         developer: {model, effort} + gate_fix_rounds (from team-config),
-//         respond?: {round} when /team-respond opened a round of PR comments }
+//         respond?: {round} when /team-respond opened a round of PR comments or failing checks }
 const DIR = args.feature_dir
 const BIN = args.team_bin
 const WT = args.worktree || null
@@ -57,16 +57,16 @@ const REVIEW_SCHEMA = {
   required: ['verdict'],
 }
 
-const run = (cmd) => `Run this command from the repository root:\n\n${cmd}`
+const run = (cmd) => `Run this command from the repository root:\n\n${cmd}\n\nRun it in the FOREGROUND with the Bash tool's maximum timeout (600000 ms); never use run_in_background. If it times out, run the exact same command again in the foreground (it is safe to repeat) until it finishes, then report its JSON output.`
 
 const devPrompt = (i) => `Feature directory: ${DIR}
 ${WORKTREE_RULES}Iteration ${i} of ${MAX_ITER}${i === MAX_ITER ? ' — the LAST one; the reviewer will not request further changes after this.' : '.'}
 
 ${RESPOND && i === START
-    ? `A person reviewed the pull request and left comments. They are the unchecked H${RESPOND.round}-NN tasks under "## Comentarios de la PR — ronda ${RESPOND.round}" in tasks.md; the full text of each comment (thread, file, line, author) is in ${DIR}/respond/round-${RESPOND.round}/feedback.json, matched by the URL at the end of each task. Work every one of them, then any other unchecked task. The rest of the feature was already approved: change only what these comments need.`
+    ? `The pull request got feedback. It is the unchecked tasks under "## Comentarios de la PR — ronda ${RESPOND.round}" in tasks.md: H${RESPOND.round}-NN are comments from a person, whose full text (thread, file, line, author) is in ${DIR}/respond/round-${RESPOND.round}/feedback.json, matched by the URL at the end of each task; C${RESPOND.round}-NN are CI checks that failed on the PR, with the failed steps' log at the path in the task. For a C-task, find why it fails in CI (reproduce it locally when you can) and fix the cause: never skip, disable or loosen a test or check to make it pass. Work every one of them, then any other unchecked task. The rest of the feature was already approved: change only what this feedback needs.`
     : i === 1
     ? 'Implement the plan: work the unchecked tasks in tasks.md in order.'
-    : `The reviewer requested changes. Start with every unchecked R-task in tasks.md: the ones under the newest "## Correcciones — revisión ${i - 1}" and any earlier one marked "reabierta en revisión ${i - 1}" (read the matching section of review-report.md for the details). Then any other unchecked task, including H-tasks from PR comments.`}
+    : `The reviewer requested changes. Start with every unchecked R-task in tasks.md: the ones under the newest "## Correcciones — revisión ${i - 1}" and any earlier one marked "reabierta en revisión ${i - 1}" (read the matching section of review-report.md for the details). Then any other unchecked task, including H- and C-tasks from the PR.`}
 
 Follow your iteration procedure: implement, test, mark [x], commit, append to dev-log.md.
 Return the task ids you completed, the ones still pending, the ones only a person can do (needs_human), and your commit SHAs.`
