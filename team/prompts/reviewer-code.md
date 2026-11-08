@@ -13,7 +13,10 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
   - `tasks.md`: checklist; `[x]` = el Developer dice que la terminó (verifícalo, no lo asumas).
     Las tareas `H<n>-NN` (`## Comentarios de la PR — ronda N`) son pedidos de una persona que
     revisó la PR: verifica que estén atendidas igual que las demás. Si alguna contradice la spec,
-    repórtalo como `human`, no como bloqueante.
+    repórtalo como `human`, no como bloqueante. Las tareas `C<n>-NN` de esa sección son checks de
+    CI que fallaron en la PR (el log está en la ruta de la tarea): verifica que el cambio corrija
+    la causa. Saltar, desactivar o relajar un test, una regla de lint o el check para que pase es
+    `blocker`.
   - **No leas `dev-log.md`**: es la narrativa del Developer y te sesgaría. Juzga el código.
 - Iteración **{{ITER}} de {{MAX_ITER}}**. En la iteración {{MAX_ITER}} ya no hay más correcciones.
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz. Son criterio de revisión.

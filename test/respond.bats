@@ -120,3 +120,73 @@ JSON
   respond fetch
   [ "$status" -ne 0 ]
 }
+
+# A PR whose head has checks: one failed Actions job, one failed external status, one cancelled
+# job, one still running and one green.
+with_checks() { # <head sha>
+  jq --arg oid "$1" '.data.repository.pullRequest.commits = {nodes: [{commit: {oid: $oid, statusCheckRollup: {state: "FAILURE", contexts: {nodes: [
+      {__typename: "CheckRun", databaseId: 901, name: "test", status: "COMPLETED", conclusion: "FAILURE",
+       detailsUrl: "https://x/runs/55/job/901", checkSuite: {workflowRun: {databaseId: 55, workflow: {name: "CI"}}}},
+      {__typename: "CheckRun", databaseId: 902, name: "lint", status: "COMPLETED", conclusion: "CANCELLED",
+       detailsUrl: "u", checkSuite: {workflowRun: {databaseId: 55, workflow: {name: "CI"}}}},
+      {__typename: "CheckRun", databaseId: 903, name: "e2e", status: "IN_PROGRESS", conclusion: null,
+       detailsUrl: "u", checkSuite: {workflowRun: {databaseId: 56, workflow: {name: "E2E"}}}},
+      {__typename: "CheckRun", databaseId: 904, name: "build", status: "COMPLETED", conclusion: "SUCCESS",
+       detailsUrl: "u", checkSuite: null},
+      {__typename: "StatusContext", context: "ext/coverage", state: "FAILURE", targetUrl: "https://ext/1",
+       description: "Coverage dropped"}]}}}}]}' "$FAKE_DIR/graphql.json" >"$FAKE_DIR/g" && mv "$FAKE_DIR/g" "$FAKE_DIR/graphql.json"
+}
+
+@test "fetch turns failing checks into items with the failed job's log, and sums up CI" {
+  head=$(git -C "$WT" rev-parse HEAD)
+  with_checks "$head"
+  printf 'test\tRun tests\t1) test parse/1 fails\n' >"$FAKE_DIR/run-log.txt"
+  respond fetch
+  [ "$(jq -c '[.count, [.items[] | select(.kind == "check") | .key]]' <<<"$output")" = \
+    "[6,[\"ci:901\",\"ci:${head:0:12}:ext/coverage\"]]" ]
+  [ "$(jq -c '.ci | [.state, .stale, .total, .failed, .pending]' <<<"$output")" = \
+    '["failing",false,5,["test","ext/coverage"],["e2e"]]' ]
+  item=$(jq -c '.items[] | select(.key == "ci:901")' <<<"$output")
+  [ "$(jq -c '[.name, .author, .run_id, .job_id]' <<<"$item")" = '["CI / test",null,55,901]' ]
+  [ "$(jq -r .log <<<"$item")" = "$DIR/respond/round-1/ci-901.log" ]
+  grep -q 'test parse/1 fails' "$DIR/respond/round-1/ci-901.log"
+  grep -q 'gh run view 55 --job 901 --log-failed -R o/r' "$FAKE_DIR/gh.log"
+  [[ "$(jq -r '.items[] | select(.kind == "check" and .job_id == null) | .body' <<<"$output")" == *"Coverage dropped"* ]]
+}
+
+@test "fetch flags checks of an older head as stale, and keeps going without a job log" {
+  with_checks 0123456789abcdef0123456789abcdef01234567
+  respond fetch
+  [ "$(jq -r .ci.stale <<<"$output")" = true ]
+  grep -q 'could not read the failed steps' "$DIR/respond/round-1/ci-901.log"
+}
+
+@test "check tasks become C tasks with their log, are seen once, and get no reply" {
+  with_checks "$(git -C "$WT" rev-parse HEAD)"
+  echo 'log' >"$FAKE_DIR/run-log.txt"
+  respond fetch
+  echo '[{"key":"t:T1","task":"Validar nil","reply":null},{"key":"ci:901","task":"Arreglar parse/1","reply":null}]' \
+    >"$DIR/respond/round-1/plan.json"
+  respond tasks 1
+  [ "$(jq -c .task_ids <<<"$output")" = '["H1-01","C1-02"]' ]
+  grep -qF -- "- [ ] C1-02 Arreglar parse/1 (log: \`$DIR/respond/round-1/ci-901.log\`) · CI «CI / test»: https://x/runs/55/job/901" "$DIR/tasks.md"
+  [ "$(jq -c '.respond.seen | map(select(type == "string")) | sort' "$DIR/state.json")" = \
+    "$(jq -nc --arg s "ci:$(git -C "$WT" rev-parse HEAD | cut -c1-12):ext/coverage" '["ci:901", $s] | sort')" ]
+
+  echo '[{"key":"t:T1","body":"Hecho."},{"key":"ci:901","body":"no"}]' >"$DIR/respond/round-1/replies.json"
+  respond reply 1
+  [ "$(jq -c '[.ok, .posted, .failed]' <<<"$output")" = '[true,1,0]' ]
+  grep -q 'skip ci:901: a CI check gets no reply' "$DIR/respond/round-1/replies.log"
+
+  respond fetch
+  [ "$(jq -c '[.count, .ci.state]' <<<"$output")" = '[0,"failing"]' ]
+}
+
+@test "a PR with only running checks has nothing to do yet" {
+  jq '.data.repository.pullRequest |= (.reviewThreads.nodes = [] | .reviews.nodes = [] | .comments.nodes = []
+      | .commits = {nodes: [{commit: {oid: "abc", statusCheckRollup: {contexts: {nodes: [
+          {__typename: "CheckRun", databaseId: 1, name: "test", status: "QUEUED", conclusion: null}]}}}}]})' \
+    "$FAKE_DIR/graphql.json" >"$FAKE_DIR/g" && mv "$FAKE_DIR/g" "$FAKE_DIR/graphql.json"
+  respond fetch
+  [ "$(jq -c '[.count, .ci.state, .ci.pending]' <<<"$output")" = '[0,"pending",["test"]]' ]
+}

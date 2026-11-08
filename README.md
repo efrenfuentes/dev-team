@@ -75,9 +75,10 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    con `gh` hacia la rama base. Antes te muestra el título, el estado del ciclo y el cuerpo
    (`.team/NNN-slug/pr-body.md`, que puedes editar) y pide confirmación. Si el Reviewer no
    aprobó, recomienda abrirla como borrador. Ver [Publicar la feature](#publicar-la-feature).
-7. **`/team-respond NNN`**, cuando alguien comentó la PR: trae los comentarios sin responder, te
-   muestra cómo los clasifica (cambio, pregunta o nada que hacer) y, cuando confirmas, convierte
-   los cambios en tareas `H<n>-NN` y corre Developer → gates → Reviewer sobre ellas. Al final,
+7. **`/team-respond NNN`**, cuando alguien comentó la PR o su CI falló: trae los comentarios sin
+   responder y los checks en rojo con su log, te muestra cómo los clasifica (cambio, pregunta o
+   nada que hacer) y, cuando confirmas, convierte los cambios en tareas `H<n>-NN` y los fallos de
+   CI en tareas `C<n>-NN`, y corre Developer → gates → Reviewer sobre ellas. Al final,
    con tu confirmación, hace push y responde en cada hilo. Ver
    [Responder la revisión de la PR](#responder-la-revisión-de-la-pr).
 8. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
@@ -129,6 +130,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_BRANCH_PREFIX` | `feat/` |
 | `TEAM_PARTITION_BASE` | `100` (la feature `007` usa la partición `107`) |
 | `TEAM_GATES_LOCK` | `0` (1 corre los gates de un mismo repo de a uno) |
+| `TEAM_STACK_GATES` | `1` (0 apaga los gates por defecto del stack) |
 
 Los modelos de Claude aceptan `opus`, `sonnet`, `haiku` o `fable`. Los esfuerzos aceptan
 `low`, `medium`, `high`, `xhigh` o `max`. Para ver la configuración actual:
@@ -141,12 +143,33 @@ primer script de gates que encuentra:
 
 1. `<repo>/.team/gates.sh` (local del proyecto)
 2. `team/gates/<nombre-del-repo>.sh` (en este repo)
+3. Los gates por defecto del stack, `team/gates/stacks/<stack>.sh` (`TEAM_STACK_GATES=0` los
+   apaga)
 
 El script corre desde la raíz del worktree con `BASE_SHA`, `BASE_REF`, `TEAM_PARTITION` y
 `MIX_TEST_PARTITION` exportados, y debe salir
 con un código distinto de cero si algo falla. Conviene que solo verifique y no modifique
-archivos (por ejemplo, un chequeo de formato en vez de un formateador). Si no hay script, el
-ciclo sigue y lo marca como "sin gates configurados".
+archivos (por ejemplo, un chequeo de formato en vez de un formateador). Si no hay script ni
+stack conocido, el ciclo sigue y lo marca como "sin gates configurados".
+`team-gates <feature_dir> --which` dice cuál se usaría, sin correrlo.
+
+### Gates por defecto de cada stack
+
+Corren todos los pasos aunque uno falle, para que el Developer vea todo lo que está en rojo, y
+saltan (diciéndolo en el log) las herramientas que el proyecto no usa:
+
+| Stack | Se detecta por | Gates |
+|---|---|---|
+| Elixir / Phoenix | `mix.exs` | `compile --warnings-as-errors`, `deps.unlock --check-unused`, `format --check-formatted`, `credo --strict` y `sobelow` si son dependencias, `mix test --warnings-as-errors` |
+| Ruby / Rails | `Gemfile` | `rubocop` y `brakeman` si están en `Gemfile.lock`, `rspec` (con `spec/`), o `bin/rails test`, o `rake test` |
+| Go | `go.mod` | `gofmt -l`, `go vet`, `golangci-lint` si hay `.golangci.*`, `go test ./...` |
+| Rust | `Cargo.toml` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` |
+| Python | `pyproject.toml`, `setup.py` o `requirements.txt` | `ruff check` y `ruff format --check`, `mypy` y `pytest`, cada uno si el proyecto lo configura o depende de él; con `uv run`, `poetry run` o el `.venv` |
+| Node / TypeScript | `package.json` | los scripts del proyecto que existan: chequeo de formato (`format:check`, …), `lint`, `typecheck` (o `tsc --noEmit` si hay `tsconfig.json`), `test`, con su gestor de paquetes y `CI=true` |
+
+El orden de detección importa: un proyecto Rails con `package.json` es Ruby. Si los gates por
+defecto no te sirven (otro comando de test, un paso extra), copia el del stack a
+`<repo>/.team/gates.sh` y ajústalo: el del proyecto siempre gana.
 
 Ejemplo de `team/gates/<nombre-del-repo>.sh`:
 
@@ -225,24 +248,33 @@ No lo corras mientras `/team-dev` o `/team-respond` trabajan sobre la misma feat
 ## Responder la revisión de la PR
 
 `/team-respond NNN` (script: `~/.claude/team/bin/team-respond`) cierra el ida y vuelta con quien
-revisa la PR:
+revisa la PR y con su CI:
 
 1. **`fetch`** lee la PR con una consulta GraphQL y se queda con lo que nadie respondió: hilos sin
    resolver cuyo último comentario no es del equipo, reviews con comentario (cambios pedidos o
    comentarios) y comentarios de la conversación. Ignora a los bots, las respuestas del equipo
    (llevan la marca `<!-- dev-team -->`) y lo ya atendido en rondas anteriores. Queda en
    `.team/NNN-slug/respond/round-N/feedback.json`.
+   En la misma consulta lee los checks del último commit de la PR. Cada check que falló (un job
+   de GitHub Actions o un status externo) es un ítem más, y de los jobs de Actions baja el log de
+   los pasos que fallaron (`respond/round-N/ci-<job>.log`). Si el CI todavía corre, te ofrece
+   esperarlo; si la rama local tiene commits que la PR no tiene, te avisa de que los checks son
+   de código viejo.
 2. Claude **clasifica** cada comentario (cambio, pregunta o nada que hacer), te muestra la tabla y
    espera tu confirmación. Lo que pide una decisión de producto te lo pregunta.
 3. **`tasks`** agrega `## Comentarios de la PR — ronda N` a `tasks.md`, con una tarea `H<N>-NN` por
-   cada cambio, y abre una ronda del loop: el límite de revisiones de la feature sube a las ya
+   cada cambio y una `C<N>-NN` por cada check que hay que arreglar (con la ruta del log). Un fallo
+   que no es de la feature (flaky, infraestructura, secretos, o que también falla en la base) no
+   se vuelve tarea: te lo dice para que lo resuelvas tú, y abre una ronda del loop: el límite de revisiones de la feature sube a las ya
    usadas más `TEAM_RESPOND_REVIEWS` (queda en `state.json` como `review_budget`), así que
    funciona aunque el ciclo ya estuviera aprobado o agotado.
-4. Corre el workflow `dev-team` con el Developer enfocado en las tareas `H`, más los gates (con
-   reparación) y el Reviewer, que también verifica las tareas `H`.
+4. Corre el workflow `dev-team` con el Developer enfocado en las tareas `H` y `C`, más los gates
+   (con reparación) y el Reviewer, que también las verifica. Una tarea `C` se arregla en la
+   causa: saltar, desactivar o relajar un test o un check para que pase es bloqueante.
 5. Te muestra las respuestas y los commits, y con tu confirmación hace push y **`reply`**: responde
    dentro de cada hilo y, para reviews y comentarios sueltos, con un comentario que enlaza al
-   original. Los hilos los resuelve quien revisa, no el equipo.
+   original. Los checks no llevan respuesta: el push vuelve a correr el CI, y el siguiente
+   `/team-respond` muestra si pasó. Los hilos los resuelve quien revisa, no el equipo.
 
 `--reset` de `/team-dev` conserva las secciones de comentarios de la PR: son pedidos de una
 persona, no del Reviewer.
@@ -271,7 +303,12 @@ Un worktree nuevo no trae nada que git ignore: dependencias, compilados ni archi
 | Elixir / Phoenix | `mix.exs` | `mix deps.get`, paquetes npm de `assets/` si hay, `mix ecto.create` en test |
 | Ruby / Rails | `Gemfile` | copia `config/master.key` y `config/credentials/*.key`, `bundle install`, paquetes JS si hay `package.json`, `bin/rails db:prepare` en test |
 
-Para Go, Rust o Python no hay setup por defecto todavía; si hace falta, va en `.team/setup.sh`.
+| Go | `go.mod` | `go mod download` |
+| Rust | `Cargo.toml` | `cargo fetch` |
+| Python | `pyproject.toml`, `setup.py` o `requirements.txt` | `uv sync` o `poetry install` (con el entorno dentro del worktree) si hay lockfile, si no un `.venv` con `pip` |
+| Node / TypeScript | `package.json` | instala los paquetes con el gestor del lockfile (`pnpm`, `yarn`, `bun` o `npm ci`) |
+
+Si el setup de tu proyecto es otro, va en `.team/setup.sh`.
 El log queda en `.team/NNN-slug/logs/setup.log`.
 
 ### Tests en paralelo
@@ -311,12 +348,12 @@ team/
   lib.sh           funciones compartidas por los scripts (worktree, entorno de la feature, lock)
   bin/             team-init, team-setup, team-start, team-exec, team-config, team-gates,
                    team-review, team-status, team-clean
-  setup/stacks/    setup y teardown por defecto de cada stack (elixir.sh, ruby.sh)
+  setup/stacks/    setup y teardown por defecto de cada stack (elixir, ruby, go, rust, python, node)
   plan-review.js   workflow Reviewer ↔ Planner
   dev-team.js      workflow Developer → gates → Reviewer
   prompts/         prompts del Reviewer (plan, código, seguridad, reporte final)
   schemas/         JSON schema del veredicto del Reviewer
-  gates/           scripts de gates por repo
+  gates/           scripts de gates por repo, y en gates/stacks/ los de cada stack
 ```
 
 ## Licencia

@@ -23,7 +23,7 @@ done
 
 step shellcheck
 # shellcheck disable=SC2046
-$(tool shellcheck) shellcheck -x team/bin/* team/lib.sh team/config.sh team/gates/*.sh team/setup/stacks/*.sh \
+$(tool shellcheck) shellcheck -x team/bin/* team/lib.sh team/config.sh team/gates/*.sh team/gates/stacks/*.sh team/setup/stacks/*.sh \
   install.sh test/run.sh test/fakes/* || status=1
 
 step bats

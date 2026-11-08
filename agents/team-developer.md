@@ -42,6 +42,12 @@ repository root as usual.
    (thread, file, line) is in `<dir>/respond/round-N/feedback.json`, matched by the URL at the end
    of the task. If one is a question rather than a change, or you disagree with it, leave it
    unchecked and explain in dev-log.md: the person gets an answer on the PR.
+   CI tasks (`C<n>-NN`, in the same section) are checks that failed on the PR: the failed steps'
+   log is at the path in the task. Find the cause (reproduce it with `team-exec` when you can:
+   CI may differ from your worktree in env, versions or a clean database) and fix it. Never skip,
+   disable or loosen a test, lint rule or check to turn it green. If it fails for something
+   outside the code (secrets, a flaky external service, CI config you must not change), leave it
+   unchecked and explain in dev-log.md.
    The `## Verificación manual (persona)` section is not yours: it is for the human. Skip it.
 3. For each task: implement it following the repo's CLAUDE.md conventions and the code around
    it, write or update its tests, run the targeted tests, then mark it `- [x]` in tasks.md.

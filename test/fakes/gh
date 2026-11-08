@@ -4,6 +4,7 @@
 #   pr create   → prints $FAKE_GH_PR_URL (default https://github.com/o/r/pull/7)
 #   api graphql → $FAKE_DIR/graphql.json
 #   api repos/… → {"html_url": …}; the -f body= value is appended to $FAKE_DIR/gh-bodies.log
+#   run view    → $FAKE_DIR/run-log.txt (fails without it)
 # FAKE_GH_AUTH=0 makes `auth status` fail.
 set -u
 { printf 'gh'; printf ' %q' "$@"; echo; } >>"$FAKE_DIR/gh.log"
@@ -15,6 +16,7 @@ case "$1 ${2:-}" in
     jq -n --arg u "$url" '[{number: 7, url: $u, isDraft: false}]' >"$FAKE_DIR/pr-list.json"
     echo "$url" ;;
   "api graphql") cat "$FAKE_DIR/graphql.json" ;;
+  "run view") cat "$FAKE_DIR/run-log.txt" 2>/dev/null || { echo "log not found" >&2; exit 1; } ;;
   api\ repos/*)
     for a in "$@"; do case "$a" in body=*) printf '%s\n---\n' "${a#body=}" >>"$FAKE_DIR/gh-bodies.log" ;; esac; done
     echo "{\"html_url\": \"$url#posted\"}" ;;

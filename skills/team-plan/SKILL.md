@@ -61,7 +61,9 @@ explicitly asked for these settings.
    tasks per phase, the plan-review outcome and any open findings, the items under
    `## Verificación manual (persona)` in tasks.md (things only the user can do), plus the paths
    to `spec.md`, `plan.md`, `tasks.md` and `plan-review.md`. Also give the worktree path and its
-   branch. Ask them to review the plan, then start development with `/team-dev NNN` (from any
+   branch, and the gates the loop will run: `~/.claude/team/bin/team-gates "DIR" --which` (a
+   `stack` source means the stack's default gates; `configured: false` means no gates at all, so
+   suggest a `.team/gates.sh`). Ask them to review the plan, then start development with `/team-dev NNN` (from any
    checkout: it runs in the feature's worktree).
 
 Do not write code or start the dev loop from this skill.

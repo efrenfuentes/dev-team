@@ -51,10 +51,38 @@ team_project_script() { # <kind: gates|setup|teardown> <feature_dir>
   return 1
 }
 
-# Default per-stack script (setup/teardown) for the worktree's stack, by its marker file.
-team_stack_script() { # <worktree>
-  if [ -f "$1/mix.exs" ]; then echo "$TEAM/setup/stacks/elixir.sh"
-  elif [ -f "$1/Gemfile" ]; then echo "$TEAM/setup/stacks/ruby.sh"
+# Stack of a checkout, by its marker files. Order matters: a Rails app has a package.json too.
+team_stack() { # <worktree>
+  local d=$1
+  if [ -f "$d/mix.exs" ]; then echo elixir
+  elif [ -f "$d/Gemfile" ]; then echo ruby
+  elif [ -f "$d/go.mod" ]; then echo go
+  elif [ -f "$d/Cargo.toml" ]; then echo rust
+  elif [ -f "$d/pyproject.toml" ] || [ -f "$d/setup.py" ] || [ -f "$d/requirements.txt" ]; then echo python
+  elif [ -f "$d/package.json" ]; then echo node
+  else return 1
+  fi
+}
+
+# Default per-stack script for the worktree's stack: setup/stacks/<stack>.sh (setup and teardown)
+# or gates/stacks/<stack>.sh.
+team_stack_script() { # <worktree> [setup|gates]
+  local stack script
+  stack=$(team_stack "$1") || return 1
+  script="$TEAM/${2:-setup}/stacks/$stack.sh"
+  [ -f "$script" ] && echo "$script"
+}
+
+# Gate script of a feature and where it comes from, as "<project|repo|stack> <path>":
+# <main>/.team/gates.sh, then ~/.claude/team/gates/<repo>.sh, then the stack's default gates
+# (unless TEAM_STACK_GATES=0).
+team_gates_script() { # <feature_dir>
+  local main script
+  main=$(team_main_repo "$1")
+  if [ -f "$main/.team/gates.sh" ]; then echo "project $main/.team/gates.sh"
+  elif [ -f "$TEAM/gates/$(basename "$main").sh" ]; then echo "repo $TEAM/gates/$(basename "$main").sh"
+  elif [ "${TEAM_STACK_GATES:-1}" = 1 ] && script=$(team_stack_script "$(team_worktree "$1")" gates); then
+    echo "stack $script"
   else return 1
   fi
 }

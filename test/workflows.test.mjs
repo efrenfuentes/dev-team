@@ -119,11 +119,11 @@ test('dev-team: resumes at start_iter', async () => {
 test('dev-team: a respond round starts with the PR comments, later iterations with the corrections', async () => {
   const r = await run('dev-team.js', { ...DEV_ARGS, start_iter: 7, max_iter: 8, respond: { round: 2 } },
     { developer: dev(), gates: GREEN, 'reviewer:7': CHANGES, 'reviewer:8': OK, 'reviewer:final': FINAL })
-  assert.match(r.calls[0].prompt, /H2-NN tasks under "## Comentarios de la PR — ronda 2"/)
+  assert.match(r.calls[0].prompt, /unchecked tasks under "## Comentarios de la PR — ronda 2"[^]*H2-NN are comments[^]*C2-NN are CI checks/)
   assert.match(r.calls[0].prompt, /\/f\/respond\/round-2\/feedback\.json/)
   const second = r.calls.find(c => c.label === 'developer:8').prompt
   assert.match(second, /Correcciones — revisión 7/)
-  assert.match(second, /H-tasks from PR comments/)
+  assert.match(second, /H- and C-tasks from the PR/)
 })
 
 const PLAN_ARGS = { feature_dir: '/f', team_bin: '/b', max_rounds: 3, start_round: 1, planner: { model: 'opus', effort: 'high' } }

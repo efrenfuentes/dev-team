@@ -50,6 +50,11 @@ TEAM_BRANCH_PREFIX=${TEAM_BRANCH_PREFIX:-feat/}
 # TEAM_PARTITION). A <repo>/.team/serialize-gates file turns it on for one repo only.
 TEAM_GATES_LOCK=${TEAM_GATES_LOCK:-0}
 
+# Without a gate script of its own (<repo>/.team/gates.sh or team/gates/<repo>.sh), a repo uses
+# the default gates of its stack (team/gates/stacks/: elixir, ruby, node, python, go, rust).
+# 0 turns them off: such a repo then runs with no gates.
+TEAM_STACK_GATES=${TEAM_STACK_GATES:-1}
+
 # Feature NNN gets TEAM_PARTITION = TEAM_PARTITION_BASE + NNN (and MIX_TEST_PARTITION, the same),
 # which projects use to name the feature's own test database. The offset keeps it away from the
 # small numbers `mix test --partitions` and similar tools already use (base_app_test1, ...).
