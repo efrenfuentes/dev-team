@@ -141,7 +141,7 @@ cualquier regla; `TEAM_LEARN=0` apaga el aprendizaje (el archivo se sigue leyend
 `~/.claude/team/bin/team-issue`):
 
 1. Lee el issue con `gh` (título, descripción, etiquetas y comentarios) y crea la feature
-   `NNN-fix-<n>-<título>` en una rama `fix/…` (`TEAM_FIX_BRANCH_PREFIX`), con el issue en
+   `NNN-fix-<n>-<título>` en la rama `fix/<n>-<título>` (`TEAM_FIX_BRANCH_PREFIX`), con el issue en
    `.team/NNN-…/issue.md`. Si el issue ya tiene una feature, la retoma en vez de duplicarla.
 2. El Planner, en modo `fix`, busca la causa en el código y escribe una spec corta (problema,
    comportamiento esperado, causa con `archivo:línea`, alcance) y tareas cuya primera siempre es

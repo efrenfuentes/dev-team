@@ -165,6 +165,7 @@ test('dev-team: after the final report, the learning step updates the repo conve
   assert.match(learn.prompt, /visto en 007-f/)
   assert.doesNotMatch(learn.prompt, /feedback\.json/)
   assert.match(r.calls[0].prompt, /Learned conventions of this repo: \/r\/\.team\/conventions\.md/)
+  assert.match(r.calls[0].prompt, /\/r\/\.team\/007-f\/issue\.md exists, this is a bug fix[^]*commit the test on its own/)
   assert.deepEqual(r.result.conventions, { file: '/r/.team/conventions.md', added: LEARNED.added, reinforced: [] })
 })
 

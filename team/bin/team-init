@@ -29,7 +29,8 @@ git rev-parse --verify -q "$base_ref^{commit}" >/dev/null || { echo "unknown bas
 branch=""
 wt=""
 if [ "$TEAM_WORKTREES" = 1 ]; then
-  branch="$TEAM_BRANCH_PREFIX$slug"
+  # TEAM_BRANCH names the branch outright (team-issue: fix/<n>-<title> for the slug fix-<n>-<title>).
+  branch="${TEAM_BRANCH:-$TEAM_BRANCH_PREFIX$slug}"
   git check-ref-format --branch "$branch" >/dev/null 2>&1 || { echo "invalid branch name: $branch" >&2; exit 1; }
   if git show-ref --verify -q "refs/heads/$branch"; then
     echo "branch $branch already exists — pick another slug or delete the branch" >&2

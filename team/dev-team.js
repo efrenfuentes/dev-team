@@ -75,6 +75,8 @@ ${RESPOND && i === START
     ? 'Implement the plan: work the unchecked tasks in tasks.md in order.'
     : `The reviewer requested changes. Start with every unchecked R-task in tasks.md: the ones under the newest "## Correcciones — revisión ${i - 1}" and any earlier one marked "reabierta en revisión ${i - 1}" (read the matching section of review-report.md for the details). Then any other unchecked task, including H- and C-tasks from the PR.`}
 
+If ${DIR}/issue.md exists, this is a bug fix for that GitHub issue (/team-fix): test first. T1, the regression test, comes before any change to the code: write it, run it, check that it fails for the reason the issue reports (not a typo, a fixture or a compile error), paste the failing output in dev-log.md and commit the test on its own (\`test(scope): reproduce #<n>\`). Then fix the cause, not the symptom, and commit the fix (\`fix(scope): … (#<n>)\`); the regression test must then pass unchanged. If the test passes before your fix, do not fix anything blind: leave T1 unchecked, say what you found in dev-log.md and return blocked: true.
+
 Learned conventions of this repo: ${CONVENTIONS} (if it exists). Read it before you write code and follow it, unless spec.md, the plan or the repo's CLAUDE.md / AGENTS.md say otherwise.
 
 Follow your iteration procedure: implement, test, mark [x], commit, append to dev-log.md.

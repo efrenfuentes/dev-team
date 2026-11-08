@@ -19,12 +19,12 @@ issue_fixture() { # <n> <title> [state]
   [ "$status" -eq 0 ]
   dir=$(jq -r .feature_dir <<<"$output")
   [[ "$dir" == */.team/001-fix-42-crear-nota-con-titulo-vacio-responde-500 ]]
-  [ "$(jq -r .branch <<<"$output")" = fix/fix-42-crear-nota-con-titulo-vacio-responde-500 ]
+  [ "$(jq -r .branch <<<"$output")" = fix/42-crear-nota-con-titulo-vacio-responde-500 ]
   [ "$(jq -c '[.kind, .issue.number, .issue.state]' "$dir/state.json")" = '["fix",42,"OPEN"]' ]
   grep -q '^# Issue #42: Crear nota' "$dir/issue.md"
   grep -q '^- Etiquetas: bug' "$dir/issue.md"
   grep -q '^### @bob' "$dir/issue.md"
-  git show-ref --verify -q refs/heads/fix/fix-42-crear-nota-con-titulo-vacio-responde-500
+  git show-ref --verify -q refs/heads/fix/42-crear-nota-con-titulo-vacio-responde-500
 }
 
 @test "team-issue resumes the feature of an issue already started, and checks the issue's repo" {

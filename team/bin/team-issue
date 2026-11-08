@@ -5,7 +5,8 @@
 #   team-issue <number | issue URL> [base_ref]
 #
 # Reads the issue with gh (title, body, labels, comments) from the repo of the current directory
-# and runs team-init with the slug fix-<n>-<title>, on a TEAM_FIX_BRANCH_PREFIX branch (fix/).
+# and runs team-init with the slug fix-<n>-<title>, on the branch fix/<n>-<title>
+# (TEAM_FIX_BRANCH_PREFIX).
 # Writes <feature_dir>/issue.md (what the Planner and the Developer read) and records
 # kind: "fix" and issue: {number, url, title, state} in state.json.
 # A feature already started for the same issue is not duplicated: its directory comes back with
@@ -55,7 +56,7 @@ words=$(tr '[:upper:]' '[:lower:]' <<<"$title" | iconv -f utf-8 -t ascii//TRANSL
 words=$(sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' <<<"$words" | cut -c1-40 | sed -E 's/-+$//')
 slug="fix-$number${words:+-$words}"
 
-dir=$(TEAM_BRANCH_PREFIX="$TEAM_FIX_BRANCH_PREFIX" "$TEAM/bin/team-init" "$slug" ${base_ref:+"$base_ref"}) ||
+dir=$(TEAM_BRANCH="$TEAM_FIX_BRANCH_PREFIX$number${words:+-$words}" "$TEAM/bin/team-init" "$slug" ${base_ref:+"$base_ref"}) ||
   fail "team-init failed for $slug"
 
 jq -r '
