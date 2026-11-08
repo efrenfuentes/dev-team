@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Run a long team command (gates, the Codex reviewer) so that an agent can wait for it with
+# plain foreground Bash calls, whose timeout is 10 minutes, without ever running it twice.
+#
+#   team-await <command...>
+#
+# The first call starts the command detached (its own session, so it survives the call) and waits
+# up to TEAM_AWAIT_SECONDS (540). If it finished, prints its stdout (the command's JSON is the
+# last line) and exits with its exit code. If not, prints {"team_await": "pending", ...} and
+# exits 0: calling again with the exact same command does not start a second run, it keeps
+# waiting for the same one. A finished result is handed out once; after that the same command
+# runs anew (a gate rerun after a repair is the same command line).
+# Runs are keyed by the command line and the working directory, under
+# ${XDG_STATE_HOME:-~/.local/state}/dev-team/runs/. A run whose process died without a result,
+# or a result nobody collected for TEAM_AWAIT_STALE minutes (120), is discarded and started over.
+set -uo pipefail
+
+[ $# -gt 0 ] || { echo "usage: team-await <command...>" >&2; exit 2; }
+wait_s=${TEAM_AWAIT_SECONDS:-540}
+stale_m=${TEAM_AWAIT_STALE:-120}
+root="${XDG_STATE_HOME:-$HOME/.local/state}/dev-team/runs"
+key=$( { pwd; printf '%q ' "$@"; } | cksum | tr ' ' '-')
+run="$root/$key"
+mkdir -p "$root"
+
+alive() { [ -f "$run/pid" ] && kill -0 "$(cat "$run/pid")" 2>/dev/null; }
+
+deliver() {
+  cat "$run/out"
+  tail -n 20 "$run/err" >&2
+  local code
+  code=$(cat "$run/exit")
+  rm -rf "$run"
+  exit "$code"
+}
+
+# Leftovers: a result too old to be this caller's, or a run that died without one.
+if [ -f "$run/exit" ] && [ -n "$(find "$run/exit" -mmin +"$stale_m" 2>/dev/null)" ]; then rm -rf "$run"; fi
+if [ -d "$run" ] && [ ! -f "$run/exit" ] && ! alive && [ -n "$(find "$run" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rm -rf "$run"; fi
+
+started=false
+if mkdir "$run" 2>/dev/null; then
+  printf '%q ' "$@" >"$run/cmd"
+  # A new session (perl's setsid: there is no setsid(1) on macOS), so the run outlives this call.
+  perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec: $!\n"' \
+    bash -c 'echo $$ >"$0/pid"; "$@" >"$0/out" 2>"$0/err"; echo $? >"$0/exit.tmp"; mv "$0/exit.tmp" "$0/exit"' \
+    "$run" "$@" </dev/null >/dev/null 2>&1 &
+  started=true
+fi
+
+deadline=$((SECONDS + wait_s))
+while [ $SECONDS -lt "$deadline" ]; do
+  [ -f "$run/exit" ] && deliver
+  if [ "$started" = false ] && [ ! -f "$run/pid" ] && [ ! -d "$run" ]; then
+    # Someone else collected it in the meantime.
+    echo '{"team_await": "gone", "note": "this run was already collected by another call"}'; exit 1
+  fi
+  sleep 2
+done
+[ -f "$run/exit" ] && deliver
+jq -nc --arg c "$(cat "$run/cmd" 2>/dev/null)" --argjson s "$wait_s" \
+  '{team_await: "pending", note: "still running after \($s)s; run the exact same command again to keep waiting (it does not start a second run)", command: $c}'

@@ -6,18 +6,21 @@ effort: low
 tools: Bash
 ---
 
-You run exactly one shell command and report what it printed. You add no judgment.
+You run one shell command and report what it printed. You add no judgment.
 
-1. Run the command you are given, exactly as written, with the Bash tool and
-   `run_in_background: true`. The command can take 10–20 minutes (it calls a test suite or an
-   external reviewer); a foreground call would hit the tool's timeout. Do not change the
-   command, add flags, or run anything else before it.
-2. Wait for the completion notification. Do not poll or re-run anything while waiting.
-3. When it finishes, read the output file the tool named (`tail -n 5 <file>` with Bash). The
-   command prints a JSON object as its last stdout line. Return its fields exactly as printed,
-   copying strings verbatim.
-4. If the command fails without printing JSON, return `verdict: "ERROR"` (or `passed: false`)
-   and put the last lines of output in the error/summary field.
-5. **Never run the command a second time.** Retrying would duplicate entries in the reports.
-   If background execution is not available, run it once in the foreground with
-   `timeout: 600000` instead.
+The command starts with `team-await`: it runs the real command (a test suite or an external
+reviewer, which can take 10–20 minutes) once, detached, and waits for it for up to 9 minutes per
+call. That way you can wait for it with plain foreground calls.
+
+1. Run the command exactly as written with the Bash tool, in the **foreground**, with
+   `timeout: 600000`. **Never** use `run_in_background`: you would not get its result. Do not
+   change the command, add flags, or run anything else before it.
+2. If the last line of the output is `{"team_await":"pending",…}`, the command is still running:
+   run the exact same command again, the same way. It does not start a second run; it keeps
+   waiting for the first one. Repeat until the output ends with the command's own JSON.
+3. That last JSON line is the result. Return its fields exactly as printed, copying strings
+   verbatim.
+4. If the command ends without printing JSON, return `verdict: "ERROR"` (or `passed: false`) and
+   put the last lines of output in the error/summary field. If a Bash call itself times out,
+   run the same command again: team-await keeps the run going.
+5. Never run the underlying command (without `team-await`) yourself, and never run anything else.

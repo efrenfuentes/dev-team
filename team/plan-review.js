@@ -37,7 +37,7 @@ let stopReason = null
 for (let r = START; r <= MAX_ROUNDS; r++) {
   phase(`Ronda ${r}`)
 
-  const review = await agent(`Run this command from the repository root:\n\n${BIN}/team-review plan "${DIR}" ${r}\n\nRun it in the FOREGROUND with the Bash tool's maximum timeout (600000 ms); never use run_in_background. If it times out, run the exact same command again in the foreground (it is safe to repeat) until it finishes, then report its JSON output.`, {
+  const review = await agent(`Run this command from the repository root:\n\n${BIN}/team-await ${BIN}/team-review plan "${DIR}" ${r}\n\nRun it in the FOREGROUND with the Bash tool's timeout set to 600000 ms; never use run_in_background. If its last line is {"team_await":"pending",…}, run the exact same command again (it keeps waiting for the same run, it never starts a second one), until it prints the command's own JSON; then report that JSON.`, {
     agentType: 'team-runner', model: 'haiku', effort: 'low', label: `reviewer:plan-${r}`, phase: `Ronda ${r}`, schema: REVIEW_SCHEMA,
   })
   rounds = r

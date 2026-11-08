@@ -31,7 +31,8 @@ async function run(file, args, answers) {
   return { result, labels: calls.map(c => c.label), calls, logs }
 }
 
-const DEV_ARGS = { feature_dir: '/f', team_bin: '/b', worktree: '/wt', max_iter: 6, start_iter: 1, gate_fix_rounds: 2, developer: { model: 'opus', effort: 'medium' } }
+// learn: false keeps the loop tests to the loop; the learning step has its own tests below.
+const DEV_ARGS = { feature_dir: '/f', team_bin: '/b', worktree: '/wt', max_iter: 6, start_iter: 1, gate_fix_rounds: 2, developer: { model: 'opus', effort: 'medium' }, learn: false }
 const dev = (over = {}) => ({ completed_tasks: ['T1'], pending_tasks: [], commits: ['abc'], blocked: false, notes: '', ...over })
 const GREEN = { passed: true, configured: true }
 const RED = { passed: false, configured: true, exit_code: 1, log: '/f/gates/iter-1.log' }
@@ -45,6 +46,8 @@ test('dev-team: approved on the first review', async () => {
   assert.equal(r.result.approved, true)
   assert.equal(r.result.final_report, '/f/final-report.md')
   assert.match(r.calls.at(-1).prompt, /team-review final "\/f" 1 approved/)
+  assert.match(r.calls[1].prompt, /\/b\/team-await \/b\/team-gates "\/f" 1/)
+  assert.match(r.calls[1].prompt, /FOREGROUND[^]*never use run_in_background/)
   assert.deepEqual([r.calls[0].opts.agentType, r.calls[0].opts.model, r.calls[0].opts.effort], ['team-developer', 'opus', 'medium'])
   assert.deepEqual([r.calls[1].opts.agentType, r.calls[1].opts.model], ['team-runner', 'haiku'])
   assert.match(r.calls[0].prompt, /Worktree \(the code you change, test and commit\): \/wt/)
@@ -147,4 +150,35 @@ test('plan-review: a Reviewer error or a Planner failure stops early', async () 
   r = await run('plan-review.js', { ...PLAN_ARGS, start_round: 2 }, { 'reviewer:plan': CHANGES, 'planner:revise': null })
   assert.deepEqual(r.labels, ['reviewer:plan-2', 'planner:revise-2'])
   assert.match(r.result.stopped_early, /Planner falló/)
+})
+
+const LEARN_ARGS = { ...DEV_ARGS, feature_dir: '/r/.team/007-f', learn: { model: 'sonnet', effort: 'medium' } }
+const LEARNED = { added: ['Toda ruta /api nueva va en docs/api.md'], reinforced: [] }
+
+test('dev-team: after the final report, the learning step updates the repo conventions', async () => {
+  const r = await run('dev-team.js', LEARN_ARGS, { developer: dev(), gates: GREEN, 'reviewer:1': OK, 'reviewer:final': FINAL, learn: LEARNED })
+  assert.deepEqual(r.labels, ['developer:1', 'gates:1', 'reviewer:1', 'reviewer:final', 'learn'])
+  const learn = r.calls.at(-1)
+  assert.deepEqual([learn.opts.model, learn.opts.effort, learn.opts.agentType], ['sonnet', 'medium', undefined])
+  assert.match(learn.prompt, /learned conventions of a repository: \/r\/\.team\/conventions\.md/)
+  assert.match(learn.prompt, /\/r\/\.team\/007-f\/review-report\.md/)
+  assert.match(learn.prompt, /visto en 007-f/)
+  assert.doesNotMatch(learn.prompt, /feedback\.json/)
+  assert.match(r.calls[0].prompt, /Learned conventions of this repo: \/r\/\.team\/conventions\.md/)
+  assert.deepEqual(r.result.conventions, { file: '/r/.team/conventions.md', added: LEARNED.added, reinforced: [] })
+})
+
+test('dev-team: a respond round also learns from the PR comments; a failed learn step is not fatal', async () => {
+  const r = await run('dev-team.js', { ...LEARN_ARGS, start_iter: 3, max_iter: 4, respond: { round: 1 } },
+    { developer: dev(), gates: GREEN, 'reviewer:3': OK, 'reviewer:final': FINAL, learn: null })
+  assert.match(r.calls.at(-1).prompt, /\/r\/\.team\/007-f\/respond\/round-1\/feedback\.json/)
+  assert.equal(r.result.approved, true)
+  assert.equal(r.result.conventions, null)
+})
+
+test('dev-team: no learning with learn false, or when nothing was reviewed', async () => {
+  let r = await run('dev-team.js', DEV_ARGS, { developer: dev(), gates: GREEN, 'reviewer:1': OK, 'reviewer:final': FINAL })
+  assert.ok(!r.labels.includes('learn'))
+  r = await run('dev-team.js', LEARN_ARGS, { developer: dev({ blocked: true, commits: [] }) })
+  assert.deepEqual(r.labels, ['developer:1'])
 })

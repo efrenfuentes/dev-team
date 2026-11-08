@@ -114,7 +114,21 @@ El transcript completo de cada llamada a Codex queda en `.team/NNN-slug/logs/`.
 
 El Planner lee las `Clarificaciones` y `Decisiones de revisión` de las features anteriores del
 mismo repo y las hereda en `## Decisiones heredadas` de la spec, así no vuelve a preguntar lo ya
-decidido. El Developer corre los gates por su cuenta antes de cada commit.
+decidido.
+
+### Convenciones aprendidas
+
+Al cerrar cada ciclo de `/team-dev` o `/team-respond`, un agente (Sonnet) lee lo que el Reviewer
+y las personas que revisaron la PR tuvieron que pedir, y lo que sirve para las features
+siguientes lo convierte en reglas de `<repo>/.team/conventions.md`, agrupadas por área y con la
+feature de origen ("— visto en 003-x (R1-02)"). Si una regla ya existe, solo suma la feature a
+su origen. No anota buenas prácticas genéricas ni bugs propios de una feature, y nunca toca las
+líneas sin origen: esas las escribiste tú.
+
+El Developer lee ese archivo antes de escribir código y el Planner antes de planificar, así lo
+que se corrigió una vez no se vuelve a corregir. El Reviewer no lo lee a propósito: revisa con
+su propio criterio y no con reglas que el equipo sacó de sí mismo. Puedes editar o borrar
+cualquier regla; `TEAM_LEARN=0` apaga el aprendizaje (el archivo se sigue leyendo). El Developer corre los gates por su cuenta antes de cada commit.
 
 ## Configuración
 
@@ -137,6 +151,8 @@ una sola ejecución con variables de entorno:
 | `TEAM_PARTITION_BASE` | `100` (la feature `007` usa la partición `107`) |
 | `TEAM_GATES_LOCK` | `0` (1 corre los gates de un mismo repo de a uno) |
 | `TEAM_STACK_GATES` | `1` (0 apaga los gates por defecto del stack) |
+| `TEAM_LEARN` | `1` (0 apaga el aprendizaje de convenciones) |
+| `TEAM_LEARN_MODEL` / `TEAM_LEARN_EFFORT` | `sonnet` / `medium` |
 
 Los modelos de Claude aceptan `opus`, `sonnet`, `haiku` o `fable`. Los esfuerzos aceptan
 `low`, `medium`, `high`, `xhigh` o `max`. Para ver la configuración actual:

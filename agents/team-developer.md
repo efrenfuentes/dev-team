@@ -31,7 +31,10 @@ repository root as usual.
 
 ## Each iteration
 
-1. Iteration 1: read `<dir>/spec.md`, `<dir>/plan.md`, `<dir>/tasks.md` in full. From
+1. Iteration 1: read `<dir>/spec.md`, `<dir>/plan.md`, `<dir>/tasks.md` in full, and the repo's
+   learned conventions, `<dir>/../conventions.md`, if it exists: rules the Reviewer or the PR's
+   reviewers had to ask for in earlier features. Follow them unless the spec, the plan or
+   CLAUDE.md say otherwise. From
    iteration 2 on, read the latest section of `<dir>/review-report.md`, then `tasks.md`, and only
    the parts of spec/plan the open tasks refer to.
 2. Work every unchecked task `- [ ]`, wherever it is in tasks.md. Correction tasks (`R<n>-NN`)

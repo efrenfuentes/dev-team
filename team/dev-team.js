@@ -6,12 +6,14 @@ export const meta = {
     { title: 'Iteración 1' }, { title: 'Iteración 2' }, { title: 'Iteración 3' },
     { title: 'Iteración 4' }, { title: 'Iteración 5' }, { title: 'Iteración 6' },
     { title: 'Cierre' },
+    { title: 'Aprendizaje' },
   ],
 }
 
 // args: { feature_dir, team_bin, worktree + max_iter + start_iter (from team-start),
 //         developer: {model, effort} + gate_fix_rounds (from team-config),
-//         respond?: {round} when /team-respond opened a round of PR comments or failing checks }
+//         respond?: {round} when /team-respond opened a round of PR comments or failing checks,
+//         learn?: {model, effort} | false (from team-config) }
 const DIR = args.feature_dir
 const BIN = args.team_bin
 const WT = args.worktree || null
@@ -25,6 +27,9 @@ const DEVELOPER = args.developer || { model: 'opus', effort: 'medium' }
 const START = args.start_iter || 1
 const RESPOND = args.respond || null
 const GATE_FIX_ROUNDS = Number.isInteger(args.gate_fix_rounds) ? args.gate_fix_rounds : 2
+const LEARN = args.learn === false ? null : (args.learn || { model: 'sonnet', effort: 'medium' })
+// The feature dir is <main>/.team/NNN-slug: the repo's learned conventions sit next to it.
+const CONVENTIONS = `${DIR.replace(/\/+$/, '').replace(/\/[^/]+$/, '')}/conventions.md`
 
 const DEV_SCHEMA = {
   type: 'object',
@@ -57,7 +62,9 @@ const REVIEW_SCHEMA = {
   required: ['verdict'],
 }
 
-const run = (cmd) => `Run this command from the repository root:\n\n${cmd}\n\nRun it in the FOREGROUND with the Bash tool's maximum timeout (600000 ms); never use run_in_background. If it times out, run the exact same command again in the foreground (it is safe to repeat) until it finishes, then report its JSON output.`
+// team-await runs the command once, detached, and waits for it across foreground Bash calls:
+// a pending answer means "call it again", never "it failed" (see agents/team-runner.md).
+const run = (cmd) => `Run this command from the repository root:\n\n${BIN}/team-await ${cmd}\n\nRun it in the FOREGROUND with the Bash tool's timeout set to 600000 ms; never use run_in_background. If its last line is {"team_await":"pending",…}, run the exact same command again (it keeps waiting for the same run, it never starts a second one), until it prints the command's own JSON; then report that JSON.`
 
 const devPrompt = (i) => `Feature directory: ${DIR}
 ${WORKTREE_RULES}Iteration ${i} of ${MAX_ITER}${i === MAX_ITER ? ' — the LAST one; the reviewer will not request further changes after this.' : '.'}
@@ -67,6 +74,8 @@ ${RESPOND && i === START
     : i === 1
     ? 'Implement the plan: work the unchecked tasks in tasks.md in order.'
     : `The reviewer requested changes. Start with every unchecked R-task in tasks.md: the ones under the newest "## Correcciones — revisión ${i - 1}" and any earlier one marked "reabierta en revisión ${i - 1}" (read the matching section of review-report.md for the details). Then any other unchecked task, including H- and C-tasks from the PR.`}
+
+Learned conventions of this repo: ${CONVENTIONS} (if it exists). Read it before you write code and follow it, unless spec.md, the plan or the repo's CLAUDE.md / AGENTS.md say otherwise.
 
 Follow your iteration procedure: implement, test, mark [x], commit, append to dev-log.md.
 Return the task ids you completed, the ones still pending, the ones only a person can do (needs_human), and your commit SHAs.`
@@ -87,6 +96,43 @@ Make the gates pass, and nothing else:
 - Append a "### Iteración ${i} — reparación de gates ${k}" section to dev-log.md: what failed, what you changed, gate result.
 
 Return the commits you made (empty if you changed nothing), blocked: true if you cannot make them pass, and in notes the cause of each failure.`
+
+const LEARN_SCHEMA = {
+  type: 'object',
+  properties: {
+    added: { type: 'array', items: { type: 'string' } },
+    reinforced: { type: 'array', items: { type: 'string' } },
+    notes: { type: 'string' },
+  },
+  required: ['added', 'reinforced'],
+}
+
+const FEATURE_ID = DIR.replace(/\/+$/, '').split('/').pop()
+const learnPrompt = () => `You maintain the learned conventions of a repository: ${CONVENTIONS}
+The dev team (a Developer, a Reviewer from another model, and people reviewing the PRs) just finished a development loop on feature ${FEATURE_ID} (${DIR}). Read what it had to be told:
+- ${DIR}/review-report.md: every review, its findings (blocker, major, minor) and the R-tasks they became. The findings in ${DIR}/reviews/code-*.json have the same content as JSON.
+${RESPOND ? `- ${DIR}/respond/round-${RESPOND.round}/feedback.json and the H-tasks under "## Comentarios de la PR — ronda ${RESPOND.round}" in ${DIR}/tasks.md: what people asked for on the PR. Comments from people weigh the most.
+` : ''}- The repo's CLAUDE.md / AGENTS.md (in ${WT || 'the repository root'}), so you do not repeat or contradict them.
+
+Then update ${CONVENTIONS} with the lessons that will apply to FUTURE features of this repo:
+- A lesson is a concrete, checkable rule about this codebase ("Validate pagination params in the controller with X and return 400 with {error: …}", "Every new /api route goes in docs/api.md"), not a generic best practice anyone knows ("write tests", "handle errors"), and not a bug specific to this feature.
+- Skip findings the Reviewer later withdrew or that were not acted on, and anything that contradicts spec decisions or CLAUDE.md.
+- If a rule already in the file covers it, do not add another: append this feature to that rule's provenance ("— visto en …") and report it as reinforced. If nothing generalizes, change nothing: an empty result is fine and common.
+- Never remove or reword a rule, except to merge an exact duplicate. Never touch lines without a "— visto en" provenance: a person wrote them.
+- Keep the file under 40 rules.
+
+Format (Spanish), creating the file if it does not exist:
+
+# Convenciones aprendidas
+
+Reglas que el equipo tuvo que corregir en features anteriores. El Developer y el Planner las siguen. Edítalas libremente.
+
+## <área: API, datos, tests, seguridad, estilo, …>
+
+- <regla> — visto en ${FEATURE_ID} (R1-02)
+
+Other features may update the file at the same time: read it right before you change it, and change it with targeted edits (not by rewriting the whole file). Do not touch any other file, and never the code or git.
+Return the rules you added and the ones you reinforced (their text), and in notes anything skipped worth knowing.`
 
 const GATE_FIX_SCHEMA = {
   type: 'object',
@@ -156,10 +202,22 @@ if (last >= 1) {
   })
 }
 
+// What the Reviewer and the PR's reviewers had to ask for, generalized, so the next feature gets
+// it right the first time. Only from reviewed work, and never fatal to the loop.
+let learned = null
+if (LEARN && last >= 1) {
+  phase('Aprendizaje')
+  learned = await agent(learnPrompt(), {
+    model: LEARN.model, effort: LEARN.effort, label: 'learn', phase: 'Aprendizaje', schema: LEARN_SCHEMA,
+  })
+  if (learned) log(`Convenciones: ${learned.added?.length || 0} nuevas, ${learned.reinforced?.length || 0} reforzadas`)
+}
+
 return {
   approved,
   iterations: last,
   stopped_early: stopReason,
   final_report: report && report.verdict === 'REPORTED' ? `${DIR}/final-report.md` : null,
   review_report: `${DIR}/review-report.md`,
+  conventions: learned ? { file: CONVENTIONS, added: learned.added || [], reinforced: learned.reinforced || [] } : null,
 }

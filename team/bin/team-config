@@ -3,7 +3,7 @@
 #
 #   team-config [feature_dir]
 #   → {max_plan_rounds, max_code_reviews, gate_fix_rounds, planner: {model, effort}, developer: {model, effort},
-#      reviewer: {model, effort}, next_plan_round?, plan_approved?}
+#      reviewer: {model, effort}, learn: {model, effort} | false, next_plan_round?, plan_approved?}
 set -euo pipefail
 
 # shellcheck source=/dev/null
@@ -14,9 +14,11 @@ base=$(jq -n \
   --arg pm "$TEAM_PLANNER_MODEL" --arg pe "$TEAM_PLANNER_EFFORT" \
   --arg dm "$TEAM_DEVELOPER_MODEL" --arg de "$TEAM_DEVELOPER_EFFORT" \
   --arg rm "$TEAM_REVIEW_MODEL" --arg re "$TEAM_REVIEW_EFFORT" \
+  --arg l "$TEAM_LEARN" --arg lm "$TEAM_LEARN_MODEL" --arg le "$TEAM_LEARN_EFFORT" \
   '{max_plan_rounds: $p, max_code_reviews: $c, gate_fix_rounds: $g,
     planner: {model: $pm, effort: $pe}, developer: {model: $dm, effort: $de},
-    reviewer: {model: $rm, effort: $re}}')
+    reviewer: {model: $rm, effort: $re},
+    learn: (if $l == "1" then {model: $lm, effort: $le} else false end)}')
 
 if [ -z "${1:-}" ]; then
   echo "$base"

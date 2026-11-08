@@ -55,6 +55,13 @@ TEAM_GATES_LOCK=${TEAM_GATES_LOCK:-0}
 # 0 turns them off: such a repo then runs with no gates.
 TEAM_STACK_GATES=${TEAM_STACK_GATES:-1}
 
+# After each dev loop, an agent turns what the Reviewer and the PR's reviewers had to ask for into
+# rules in <repo>/.team/conventions.md, which the Developer and the Planner follow in later
+# features. 0 turns it off (the file is still read if it exists).
+TEAM_LEARN=${TEAM_LEARN:-1}
+TEAM_LEARN_MODEL=${TEAM_LEARN_MODEL:-sonnet}
+TEAM_LEARN_EFFORT=${TEAM_LEARN_EFFORT:-medium}
+
 # Feature NNN gets TEAM_PARTITION = TEAM_PARTITION_BASE + NNN (and MIX_TEST_PARTITION, the same),
 # which projects use to name the feature's own test database. The offset keeps it away from the
 # small numbers `mix test --partitions` and similar tools already use (base_app_test1, ...).

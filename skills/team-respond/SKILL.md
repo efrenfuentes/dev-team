@@ -56,7 +56,7 @@ comments. Pushing and posting on the PR are outward-facing: confirm each with th
    `scriptPath: ~/.claude/team/dev-team.js` (expand `~`) and `args: { feature_dir: DIR,
    worktree: <worktree>, team_bin: <absolute path of ~/.claude/team/bin>, start_iter: <start_iter>,
    max_iter: <max_iter>, developer: <developer object>, gate_fix_rounds: <gate_fix_rounds>,
-   respond: { round: N } }`, passing the team-config values exactly as printed.
+   respond: { round: N }, learn: <learn> }`, passing the team-config values exactly as printed.
    The Workflow tool only loads a `scriptPath` it can read: from a project outside this team's
    repo it refuses `~/.claude/team/…`. If it does, read the script (`cat` the resolved path
    `readlink -f ~/.claude/team/dev-team.js`) and pass its full contents as `script` instead, with the
@@ -81,7 +81,8 @@ comments. Pushing and posting on the PR are outward-facing: confirm each with th
 
 7. **Report:** the round, the tasks done and still open (H and C), the commits pushed, the replies
    posted (`posted`, `failed` and `replies.log`), and anything left for the user to decide. After a
-   push with C-tasks, say that CI runs again and `/team-respond NNN` checks the result. Threads are
+   push with C-tasks, say that CI runs again and `/team-respond NNN` checks the result. Also the
+   conventions the loop learned (`conventions` of the workflow result), if any. Threads are
    not resolved by the team: the reviewer resolves them on GitHub.
 
 Never resolve review threads, dismiss reviews, approve or merge the PR, or re-run, skip or change

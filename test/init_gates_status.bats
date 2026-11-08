@@ -36,6 +36,9 @@ setup() { setup_team; make_repo; }
 @test "team-config prints the limits, models and the plan resume point" {
   run --separate-stderr env TEAM_MAX_CODE_REVIEWS=4 TEAM_GATE_FIX_ROUNDS=1 "$BIN/team-config"
   [ "$(jq -c '[.max_code_reviews, .gate_fix_rounds, .developer.model]' <<<"$output")" = '[4,1,"opus"]' ]
+  [ "$(jq -c .learn <<<"$output")" = '{"model":"sonnet","effort":"medium"}' ]
+  run --separate-stderr env TEAM_LEARN=0 "$BIN/team-config"
+  [ "$(jq -c .learn <<<"$output")" = false ]
   make_feature demo
   mkdir -p "$DIR/reviews"
   echo '{"verdict":"CHANGES_REQUESTED"}' >"$DIR/reviews/plan-1.json"

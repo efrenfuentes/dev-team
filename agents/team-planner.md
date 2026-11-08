@@ -28,8 +28,11 @@ to the repo root (`lib/foo.ex`), never absolute worktree paths.
    them again and do not contradict them. Record the ones that bear on this feature under
    `## Decisiones heredadas` in spec.md, each with the feature it came from (`NNN-slug`). If
    this feature genuinely needs to revisit one, make that an open question and say why.
-3. Write a first draft of `<dir>/spec.md` (structure below) with what you are confident about.
-4. Return, as your final message, up to 5 **open questions** that only the requester can answer:
+3. **Learned conventions.** If `<dir>/../conventions.md` exists, read it: rules the Reviewer and
+   the PR's reviewers had to ask for in earlier features. Plan so the tasks follow them (for
+   example, a task for the docs a rule requires), and do not ask questions they already answer.
+4. Write a first draft of `<dir>/spec.md` (structure below) with what you are confident about.
+5. Return, as your final message, up to 5 **open questions** that only the requester can answer:
    product behavior, scope, priorities, edge-case policy. Do not ask what the code can answer.
    For each: the question, why it matters, 2–4 concrete options, and your recommendation.
    If there are no real ambiguities, return an empty list.
