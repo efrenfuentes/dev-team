@@ -1,18 +1,44 @@
 #!/usr/bin/env bash
 # Status of every feature workspace under <repo>/.team/. Run from anywhere inside the repo.
 #
-#   team-status [--json]
+#   team-status [--json] [--offline]
 #
 # Per feature: branch, base, plan rounds and verdict, code iterations and verdict, phase
-# (planning | planned | developing | responding | approved | incomplete), unchecked tasks, items for a person,
-# and the worktree (its path, "-" for features without one, "(removed)" after team-clean).
-# Works from the main checkout or from any of the repo's worktrees.
+# (planning | planned | developing | responding | approved | incomplete | merged | closed),
+# unchecked tasks, items for a person, the worktree (its path, "-" for features without one,
+# "(removed)" after team-clean) and the PR.
+# For a feature with a PR (or a pushed branch), it asks GitHub (team-respond peek, in parallel)
+# for the PR's state, its CI (passing | failing | pending | none) and how many comments nobody
+# answered yet. --offline, or a missing or logged-out gh, skips that and shows the PR state last
+# recorded in state.json. Works from the main checkout or from any of the repo's worktrees.
 set -euo pipefail
 
 # shellcheck source=/dev/null
 . "$HOME/.claude/team/lib.sh"
 repo=$(team_main_repo)
-json=${1:-}
+json="" offline=false
+for a in "$@"; do
+  case "$a" in --json) json=--json ;; --offline) offline=true ;; *) echo "unknown option: $a" >&2; exit 2 ;; esac
+done
+if [ "$offline" = false ] && ! { command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; }; then offline=true; fi
+
+# Ask GitHub about every feature that has a PR or a pushed branch, all at once.
+remote_refs=$(git -C "$repo" for-each-ref --format='%(refname)' refs/remotes 2>/dev/null || true)
+peeks=$(mktemp -d)
+trap 'rm -rf "$peeks"' EXIT
+if [ "$offline" = false ]; then
+  for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
+    dir=${dir%/}
+    [ -f "$dir/state.json" ] || continue
+    [ "$(jq -r '.pr.state // empty' "$dir/state.json")" != MERGED ] || continue
+    branch=$(jq -r '.branch // empty' "$dir/state.json")
+    if [ -n "$(jq -r '.pr.url // empty' "$dir/state.json")" ] ||
+      { [ -n "$branch" ] && grep -qxF "$branch" <<<"$(sed -E 's#^refs/remotes/[^/]+/##' <<<"$remote_refs")"; }; then
+      "$TEAM/bin/team-respond" "$dir" peek >"$peeks/$(basename "$dir").json" 2>/dev/null &
+    fi
+  done
+  wait
+fi
 
 rows=()
 for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
@@ -28,7 +54,12 @@ for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
 
   code_max=$(team_review_budget "$dir")
   respond_from=$(jq -r '.respond.pending.from_iter // empty' "$state")
-  if [ -n "$respond_from" ] && [ "$code_n" -lt "$respond_from" ] && [ "$code_n" -lt "$code_max" ]; then phase=responding
+  peek=$(jq -c 'select(.ok == true)' "$peeks/$(basename "$dir").json" 2>/dev/null || true)
+  [ -n "$peek" ] || peek=null
+  pr_state=$(jq -r '.pr.state // empty' "$state")
+  if [ "$pr_state" = MERGED ]; then phase=merged
+  elif [ "$pr_state" = CLOSED ]; then phase=closed
+  elif [ -n "$respond_from" ] && [ "$code_n" -lt "$respond_from" ] && [ "$code_n" -lt "$code_max" ]; then phase=responding
   elif [ "$code_v" = APPROVED ]; then phase=approved
   elif [ "$code_n" -ge "$code_max" ]; then phase=incomplete
   elif [ "$code_n" -gt 0 ]; then phase=developing
@@ -51,12 +82,16 @@ for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
     --argjson code_n "$code_n" --arg code_v "$code_v" --argjson code_max "$code_max" \
     --argjson unchecked "${unchecked:-0}" --argjson manual "$manual" --argjson human "${human:-0}" \
     --argjson final "$([ -f "$dir/final-report.md" ] && echo true || echo false)" \
-    --argjson pr "$(jq '.pr.url // null' "$state")" \
+    --argjson pr "$(jq '.pr.url // null' "$state")" --arg pr_state "$pr_state" --argjson peek "$peek" \
     '{id: $id, phase: $phase, branch: $branch, base: $base, worktree: $worktree,
       plan: {rounds: $plan_n, max: $plan_max, verdict: $plan_v},
       code: {iterations: $code_n, max: $code_max, verdict: $code_v},
       unchecked_tasks: $unchecked, manual_items: $manual, human_findings: $human, final_report: $final,
-      pr: $pr}')")
+      pr: $pr, pr_state: (if $pr_state == "" then null else $pr_state end),
+      ci: (if $peek then $peek.ci.state else null end),
+      ci_failed: (if $peek then $peek.ci.failed else null end),
+      ci_stale: (if $peek then $peek.ci.stale else null end),
+      comments: (if $peek then $peek.comments else null end)}')")
 done
 
 all=$(printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s .)
@@ -64,13 +99,16 @@ if [ "$json" = "--json" ]; then echo "$all"; exit 0; fi
 
 if [ "$(echo "$all" | jq length)" -eq 0 ]; then echo "No features under $repo/.team"; exit 0; fi
 {
-  echo "FEATURE|FASE|RAMA|PLAN|CÓDIGO|TAREAS ABIERTAS|PARA PERSONA|PR"
+  echo "FEATURE|FASE|RAMA|PLAN|CÓDIGO|TAREAS ABIERTAS|PARA PERSONA|PR|CI|COMENTARIOS"
   echo "$all" | jq -r '.[] | [
       .id, .phase, .branch,
       "\(.plan.rounds)/\(.plan.max) \(.plan.verdict)",
       "\(.code.iterations)/\(.code.max) \(.code.verdict)",
       (.unchecked_tasks | tostring),
       ((.manual_items + .human_findings) | tostring),
-      (.pr // "-" | sub(".*/pull/"; "#"))
+      (.pr // "-" | sub(".*/pull/"; "#")),
+      ({passing: "ok", failing: "FALLA", pending: "corriendo", none: "sin checks"}[.ci // ""] // "-")
+        + (if .ci_stale then " (viejo)" else "" end),
+      (.comments // "-" | tostring)
     ] | join("|")'
 } | column -t -s '|'

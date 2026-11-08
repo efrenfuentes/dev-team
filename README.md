@@ -58,9 +58,12 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    rama principal del remoto (`origin/HEAD`, o la primera de `origin/develop`, `origin/main`,
    `origin/master` que exista).
 2. Revisa `spec.md`, `plan.md` y `tasks.md`.
-3. **`/team-status`** muestra en qué fase está cada feature del repo (planning, planned,
-   developing, responding, approved, incomplete), con rondas, iteraciones, tareas abiertas, lo
-   que requiere a una persona y su PR.
+3. **`/team-status [--offline]`** muestra en qué fase está cada feature del repo (planning,
+   planned, developing, responding, approved, incomplete, merged, closed), con rondas,
+   iteraciones, tareas abiertas, lo que requiere a una persona y su PR. De las features con PR
+   le pregunta a GitHub (en paralelo, sin crear nada) el estado de la PR, su CI (`ok`, `FALLA`,
+   `corriendo`; `(viejo)` si corrió sobre un commit anterior a la rama local) y cuántos
+   comentarios nadie respondió todavía. `--offline` no consulta GitHub.
 4. **`/team-dev [NNN] [--reset]`**
    Repite el ciclo Developer → gates → Reviewer hasta que el Reviewer aprueba, con un máximo de
    6 revisiones (la implementación inicial más 5 rondas de corrección). Si los gates fallan
@@ -83,6 +86,9 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    [Responder la revisión de la PR](#responder-la-revisión-de-la-pr).
 8. **`/team-clean NNN [--force]`**, cuando la rama ya se mergeó o la descartas: borra el
    worktree y la base de datos de test de la feature. La rama y `.team/NNN-slug/` se conservan.
+   **`/team-clean --merged`** busca las features con worktree cuya PR está fusionada (o cuya rama
+   ya está en la base), te las muestra y, con tu confirmación, las limpia todas. Nunca fuerza: un
+   worktree con cambios sin commit queda como está y te lo reporta.
 
 Puedes tener varias features a la vez: planifica una mientras otra está en `/team-dev`, o corre
 dos `/team-dev` en paralelo. Cada una tiene su worktree, su rama y su base de datos de test.
@@ -342,7 +348,7 @@ la partición; nunca la del checkout principal), o con `<repo>/.team/teardown.sh
 
 ```
 agents/            definiciones de los subagentes de Claude Code
-skills/            /team-plan, /team-dev, /team-status y /team-clean
+skills/            /team-plan, /team-dev, /team-status, /team-ship, /team-respond, /team-sync y /team-clean
 team/
   config.sh        modelos, esfuerzos y límites
   lib.sh           funciones compartidas por los scripts (worktree, entorno de la feature, lock)

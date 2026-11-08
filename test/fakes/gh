@@ -2,7 +2,7 @@
 # Fake GitHub CLI for the tests. Every call is appended to $FAKE_DIR/gh.log.
 #   pr list     → $FAKE_DIR/pr-list.json, or [] (pr create writes it)
 #   pr create   → prints $FAKE_GH_PR_URL (default https://github.com/o/r/pull/7)
-#   api graphql → $FAKE_DIR/graphql.json
+#   api graphql → $FAKE_DIR/graphql-<n>.json for the PR number n (-F n=<n>), else $FAKE_DIR/graphql.json
 #   api repos/… → {"html_url": …}; the -f body= value is appended to $FAKE_DIR/gh-bodies.log
 #   run view    → $FAKE_DIR/run-log.txt (fails without it)
 # FAKE_GH_AUTH=0 makes `auth status` fail.
@@ -15,7 +15,10 @@ case "$1 ${2:-}" in
   "pr create")
     jq -n --arg u "$url" '[{number: 7, url: $u, isDraft: false}]' >"$FAKE_DIR/pr-list.json"
     echo "$url" ;;
-  "api graphql") cat "$FAKE_DIR/graphql.json" ;;
+  "api graphql")
+    n=""
+    for a in "$@"; do case "$a" in n=*) n=${a#n=} ;; esac; done
+    if [ -n "$n" ] && [ -f "$FAKE_DIR/graphql-$n.json" ]; then cat "$FAKE_DIR/graphql-$n.json"; else cat "$FAKE_DIR/graphql.json"; fi ;;
   "run view") cat "$FAKE_DIR/run-log.txt" 2>/dev/null || { echo "log not found" >&2; exit 1; } ;;
   api\ repos/*)
     for a in "$@"; do case "$a" in body=*) printf '%s\n---\n' "${a#body=}" >>"$FAKE_DIR/gh-bodies.log" ;; esac; done

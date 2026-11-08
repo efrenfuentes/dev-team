@@ -4,6 +4,8 @@
 #   team-respond <feature_dir> fetch            # new PR feedback → respond/round-N/feedback.json
 #   team-respond <feature_dir> tasks <round>    # respond/round-N/plan.json → H<N>-NN tasks in tasks.md
 #   team-respond <feature_dir> reply <round>    # respond/round-N/replies.json → replies on the PR
+#   team-respond <feature_dir> peek             # summary for team-status, read-only on GitHub: PR state,
+#                                               # unanswered comments and CI, no round created
 #
 # fetch reads the PR (state.json .pr.url, or the open PR of the branch) with one GraphQL call and
 # keeps what nobody answered yet: unresolved review threads whose last comment is not ours, review
@@ -13,7 +15,8 @@
 # status) becomes an item of kind "check", with the failed steps' log of an Actions job saved as
 # respond/round-N/ci-<job>.log. The output's .ci sums them up (passing / failing / pending, and
 # stale when the local branch has commits the PR does not have yet).
-# Fetching again before `tasks` reuses the same round.
+# Fetching again before `tasks` reuses the same round. fetch and peek record the PR's state
+# (OPEN, CLOSED, MERGED) and merge time in state.json (.pr.state, .pr.merged_at).
 #
 # plan.json, written by the /team-respond skill after the user confirms the triage:
 #   [{key, task: "<what to change>" | null, reply: "<answer>" | null}]
@@ -33,7 +36,7 @@ set -uo pipefail
 
 MARKER='<!-- dev-team -->'
 
-dir=$(cd "${1:?usage: team-respond <feature_dir> fetch | tasks <round> | reply <round>}" && pwd)
+dir=$(cd "${1:?usage: team-respond <feature_dir> fetch | tasks <round> | reply <round> | peek}" && pwd)
 mode=${2:-}
 round=${3:-}
 state="$dir/state.json"
@@ -49,12 +52,99 @@ url=$(jq -r '.pr.url // empty' "$state")
 if [ -z "$url" ]; then
   branch=$(jq -r '.branch // empty' "$state")
   [ -n "$branch" ] || fail "the feature has no branch"
-  url=$(gh pr list --head "$branch" --state open --json url --limit 1 2>/dev/null | jq -r '.[0].url // empty')
-  [ -n "$url" ] || fail "no open PR for branch '$branch' — /team-ship opens it"
+  if [ "$mode" = peek ]; then
+    # Any PR of the branch, also a merged or closed one; none is not an error here.
+    url=$(gh pr list --head "$branch" --state all --json url --limit 1 2>/dev/null | jq -r '.[0].url // empty')
+    [ -n "$url" ] || { jq -n --arg d "$dir" '{ok: true, feature_dir: $d, pr: null}'; exit 0; }
+  else
+    url=$(gh pr list --head "$branch" --state open --json url --limit 1 2>/dev/null | jq -r '.[0].url // empty')
+    [ -n "$url" ] || fail "no open PR for branch '$branch' — /team-ship opens it"
+  fi
   team_state_set "$dir" '.pr.url = $u' --arg u "$url"
 fi
 [[ "$url" =~ github\.com/([^/]+)/([^/]+)/pull/([0-9]+) ]] || fail "not a GitHub PR URL: $url"
 owner=${BASH_REMATCH[1]} name=${BASH_REMATCH[2]} number=${BASH_REMATCH[3]}
+
+# Read the PR with one GraphQL call into <out>/raw.json, and derive <out>/feedback.json (the items
+# nobody answered yet) and <out>/ci.json (the checks of the PR's head).
+read_pr() { # <out>
+  query='query($owner: String!, $name: String!, $n: Int!) {
+    repository(owner: $owner, name: $name) { pullRequest(number: $n) {
+      state mergedAt
+      reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine
+        comments(first: 100) { nodes { databaseId body url author { login __typename } } } } }
+      reviews(first: 100) { nodes { databaseId state body url author { login __typename } } }
+      comments(first: 100) { nodes { databaseId body url author { login __typename } } }
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
+        __typename
+        ... on CheckRun { databaseId name status conclusion detailsUrl
+                          checkSuite { workflowRun { databaseId workflow { name } } } }
+        ... on StatusContext { context state targetUrl description }
+      } } } } } }
+    } } }'
+  gh api graphql -f query="$query" -F owner="$owner" -F name="$name" -F n="$number" >"$1/raw.json" 2>"$1/gh.err" ||
+    fail "gh api graphql failed: $(head -3 "$1/gh.err" | tr '\n' ' ')"
+  jq -e '.data.repository.pullRequest.state' "$1/raw.json" >/dev/null 2>&1 || fail "could not read the PR $url"
+  team_state_set "$dir" '.pr.state = $p.state | .pr.merged_at = $p.mergedAt' \
+    --argjson p "$(jq -c '.data.repository.pullRequest | {state, mergedAt}' "$1/raw.json")"
+
+  jq --arg m "$MARKER" --argjson seen "$(jq '.respond.seen // []' "$state")" '
+    .data.repository.pullRequest as $pr
+    | def ours: .body | contains($m);
+      def bot: (.author.__typename // "") == "Bot" or ((.author.login // "") | endswith("[bot]"));
+      def fresh: (.databaseId | IN($seen[]) | not);
+    [ ($pr.reviewThreads.nodes[]
+        | select(.isResolved | not)
+        | .comments.nodes as $c
+        | select(($c | length) > 0)
+        | ($c | last) as $last
+        | select(($last | ours | not) and ($last | bot | not) and ($last | fresh))
+        | {key: ("t:" + .id), kind: "thread", author: $last.author.login, url: $last.url,
+           path, line: (.line // .originalLine), outdated: .isOutdated,
+           reply_to: $c[0].databaseId, seen_id: $last.databaseId,
+           body: ($c | map(select(ours | not) | "@\(.author.login): \(.body)") | join("\n\n"))}),
+      ($pr.reviews.nodes[]
+        | select((.state == "CHANGES_REQUESTED" or .state == "COMMENTED") and (.body | length) > 0)
+        | select((ours | not) and (bot | not) and fresh)
+        | {key: ("r:" + (.databaseId | tostring)), kind: "review", author: .author.login, url,
+           state, seen_id: .databaseId, body}),
+      ($pr.comments.nodes[]
+        | select((ours | not) and (bot | not) and fresh)
+        | {key: ("c:" + (.databaseId | tostring)), kind: "comment", author: .author.login, url,
+           seen_id: .databaseId, body}),
+      ($pr.commits.nodes[0].commit as $c
+        | ($c.statusCheckRollup.contexts.nodes // [])[]
+        | if .__typename == "CheckRun" then
+            select(.status == "COMPLETED" and (.conclusion | IN("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED")))
+            | (.checkSuite.workflowRun.workflow.name // null) as $wf
+            | {key: ("ci:" + (.databaseId | tostring)), name: (if $wf then "\($wf) / \(.name)" else .name end),
+               url: .detailsUrl, conclusion, run_id: .checkSuite.workflowRun.databaseId, job_id: .databaseId}
+          else
+            select(.state | IN("FAILURE", "ERROR"))
+            | {key: ("ci:" + $c.oid[0:12] + ":" + .context), name: .context, url: .targetUrl,
+               conclusion: .state, run_id: null, job_id: null, description}
+          end
+        | select(.key | IN($seen[]) | not)
+        | . + {kind: "check", author: null, seen_id: .key, sha: $c.oid, log: null,
+               body: "El check «\(.name)» falló (\(.conclusion)) en \($c.oid[0:7])."
+                     + (if .description then " \(.description)" else "" end)})
+    ]' "$1/raw.json" >"$1/feedback.json" || fail "could not parse the PR feedback"
+
+  # The state of every check on the PR's head, and whether the local branch is ahead of it.
+  local_head=$(git rev-parse -q --verify "refs/heads/$(jq -r '.branch // empty' "$state")" 2>/dev/null || true)
+  jq --arg local "$local_head" '
+    .data.repository.pullRequest.commits.nodes[0].commit as $c
+    | ($c.statusCheckRollup.contexts.nodes // []) as $n
+    | def name: if .__typename == "CheckRun" then .name else .context end;
+      def pending: if .__typename == "CheckRun" then .status != "COMPLETED" else (.state | IN("PENDING", "EXPECTED")) end;
+      def failing: if .__typename == "CheckRun" then (.status == "COMPLETED" and (.conclusion | IN("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"))) else (.state | IN("FAILURE", "ERROR")) end;
+    {head: ($c.oid // null), local_head: (if $local == "" then null else $local end),
+     stale: ($local != "" and $c.oid != null and $local != $c.oid),
+     state: (if ($n | length) == 0 then "none" elif any($n[]; failing) then "failing"
+             elif any($n[]; pending) then "pending" else "passing" end),
+     total: ($n | length), failed: [$n[] | select(failing) | name],
+     pending: [$n[] | select(pending) | name]}' "$1/raw.json" >"$1/ci.json" || fail "could not parse the PR checks"
+}
 
 rdir() { echo "$dir/respond/round-$1"; }
 need_round() { [[ "$round" =~ ^[0-9]+$ ]] && [ -d "$(rdir "$round")" ] || fail "unknown round '$round'"; }
@@ -67,64 +157,7 @@ case "$mode" in
     out=$(rdir "$round")
     mkdir -p "$out"
 
-    query='query($owner: String!, $name: String!, $n: Int!) {
-      repository(owner: $owner, name: $name) { pullRequest(number: $n) {
-        state
-        reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine
-          comments(first: 100) { nodes { databaseId body url author { login __typename } } } } }
-        reviews(first: 100) { nodes { databaseId state body url author { login __typename } } }
-        comments(first: 100) { nodes { databaseId body url author { login __typename } } }
-        commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { databaseId name status conclusion detailsUrl
-                            checkSuite { workflowRun { databaseId workflow { name } } } }
-          ... on StatusContext { context state targetUrl description }
-        } } } } } }
-      } } }'
-    gh api graphql -f query="$query" -F owner="$owner" -F name="$name" -F n="$number" >"$out/raw.json" 2>"$out/gh.err" ||
-      fail "gh api graphql failed: $(head -3 "$out/gh.err" | tr '\n' ' ')"
-
-    jq --arg m "$MARKER" --argjson seen "$(jq '.respond.seen // []' "$state")" '
-      .data.repository.pullRequest as $pr
-      | def ours: .body | contains($m);
-        def bot: (.author.__typename // "") == "Bot" or ((.author.login // "") | endswith("[bot]"));
-        def fresh: (.databaseId | IN($seen[]) | not);
-      [ ($pr.reviewThreads.nodes[]
-          | select(.isResolved | not)
-          | .comments.nodes as $c
-          | select(($c | length) > 0)
-          | ($c | last) as $last
-          | select(($last | ours | not) and ($last | bot | not) and ($last | fresh))
-          | {key: ("t:" + .id), kind: "thread", author: $last.author.login, url: $last.url,
-             path, line: (.line // .originalLine), outdated: .isOutdated,
-             reply_to: $c[0].databaseId, seen_id: $last.databaseId,
-             body: ($c | map(select(ours | not) | "@\(.author.login): \(.body)") | join("\n\n"))}),
-        ($pr.reviews.nodes[]
-          | select((.state == "CHANGES_REQUESTED" or .state == "COMMENTED") and (.body | length) > 0)
-          | select((ours | not) and (bot | not) and fresh)
-          | {key: ("r:" + (.databaseId | tostring)), kind: "review", author: .author.login, url,
-             state, seen_id: .databaseId, body}),
-        ($pr.comments.nodes[]
-          | select((ours | not) and (bot | not) and fresh)
-          | {key: ("c:" + (.databaseId | tostring)), kind: "comment", author: .author.login, url,
-             seen_id: .databaseId, body}),
-        ($pr.commits.nodes[0].commit as $c
-          | ($c.statusCheckRollup.contexts.nodes // [])[]
-          | if .__typename == "CheckRun" then
-              select(.status == "COMPLETED" and (.conclusion | IN("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED")))
-              | (.checkSuite.workflowRun.workflow.name // null) as $wf
-              | {key: ("ci:" + (.databaseId | tostring)), name: (if $wf then "\($wf) / \(.name)" else .name end),
-                 url: .detailsUrl, conclusion, run_id: .checkSuite.workflowRun.databaseId, job_id: .databaseId}
-            else
-              select(.state | IN("FAILURE", "ERROR"))
-              | {key: ("ci:" + $c.oid[0:12] + ":" + .context), name: .context, url: .targetUrl,
-                 conclusion: .state, run_id: null, job_id: null, description}
-            end
-          | select(.key | IN($seen[]) | not)
-          | . + {kind: "check", author: null, seen_id: .key, sha: $c.oid, log: null,
-                 body: "El check «\(.name)» falló (\(.conclusion)) en \($c.oid[0:7])."
-                       + (if .description then " \(.description)" else "" end)})
-      ]' "$out/raw.json" >"$out/feedback.json" || fail "could not parse the PR feedback"
+    read_pr "$out"
 
     # The failed steps' log of each failing GitHub Actions job, for the triage and the Developer.
     while IFS=$'\t' read -r key run job; do
@@ -139,20 +172,6 @@ case "$mode" in
         mv "$out/feedback.tmp" "$out/feedback.json"
     done < <(jq -r '.[] | select(.kind == "check" and .job_id != null and .run_id != null) | [.key, .run_id, .job_id] | @tsv' "$out/feedback.json")
 
-    # The state of every check on the PR's head, and whether the local branch is ahead of it.
-    local_head=$(git rev-parse -q --verify "refs/heads/$(jq -r '.branch // empty' "$state")" 2>/dev/null || true)
-    jq --arg local "$local_head" '
-      .data.repository.pullRequest.commits.nodes[0].commit as $c
-      | ($c.statusCheckRollup.contexts.nodes // []) as $n
-      | def name: if .__typename == "CheckRun" then .name else .context end;
-        def pending: if .__typename == "CheckRun" then .status != "COMPLETED" else (.state | IN("PENDING", "EXPECTED")) end;
-        def failing: if .__typename == "CheckRun" then (.status == "COMPLETED" and (.conclusion | IN("FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"))) else (.state | IN("FAILURE", "ERROR")) end;
-      {head: ($c.oid // null), local_head: (if $local == "" then null else $local end),
-       stale: ($local != "" and $c.oid != null and $local != $c.oid),
-       state: (if ($n | length) == 0 then "none" elif any($n[]; failing) then "failing"
-               elif any($n[]; pending) then "pending" else "passing" end),
-       total: ($n | length), failed: [$n[] | select(failing) | name],
-       pending: [$n[] | select(pending) | name]}' "$out/raw.json" >"$out/ci.json" || fail "could not parse the PR checks"
 
     jq -n --arg d "$dir" --arg u "$url" --argjson r "$round" --arg f "$out/feedback.json" \
       --arg s "$(jq -r '.data.repository.pullRequest.state' "$out/raw.json")" --slurpfile items "$out/feedback.json" \
@@ -228,5 +247,15 @@ case "$mode" in
       '{ok: ($f == 0), feature_dir: $d, round: $r, posted: $p, failed: $f, log: $log}'
     ;;
 
-  *) fail "mode must be fetch, tasks or reply" ;;
+  peek)
+    out=$(mktemp -d)
+    trap 'rm -rf "$out"' EXIT
+    read_pr "$out"
+    jq -n --arg d "$dir" --arg u "$url" --slurpfile items "$out/feedback.json" --slurpfile ci "$out/ci.json" \
+      --argjson p "$(jq -c '.data.repository.pullRequest | {state, mergedAt}' "$out/raw.json")" '
+      {ok: true, feature_dir: $d, pr: $u, pr_state: $p.state, merged_at: $p.mergedAt,
+       comments: ([$items[0][] | select(.kind != "check")] | length), ci: $ci[0]}'
+    ;;
+
+  *) fail "mode must be fetch, tasks, reply or peek" ;;
 esac

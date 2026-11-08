@@ -2,6 +2,7 @@
 # Remove a feature's worktree once you are done with it (merged, or abandoned). Prints JSON.
 #
 #   team-clean <feature_dir> [--force]
+#   team-clean --merged [--dry-run]     # every feature whose work is merged and still has a worktree
 #
 # Keeps the branch (its commits, the PR) and the feature workspace in .team/ (spec, plan,
 # reports), so /team-status still lists it and team-start can recreate the worktree later.
@@ -9,10 +10,51 @@
 # <main>/.team/teardown.sh, ~/.claude/team/teardown/<repo>.sh, or — only when the repo uses the
 # default stack setup — the stack's teardown. Refuses a worktree with uncommitted changes
 # unless --force (which discards them).
+#
+# --merged picks, from the repo of the current directory, the features with a worktree whose PR
+# is merged (asked to GitHub with team-respond peek when gh is available, else the state last
+# recorded) or whose branch is already contained in its base_ref. It cleans each one as above,
+# never with --force: a dirty worktree is reported and left alone. --dry-run only lists them.
 set -uo pipefail
 
 # shellcheck source=/dev/null
 . "$HOME/.claude/team/lib.sh"
+
+if [ "${1:-}" = --merged ]; then
+  dry=false
+  [ "${2:-}" = --dry-run ] && dry=true
+  repo=$(team_main_repo) || { jq -n '{ok: false, error: "not inside a git repository"}'; exit 1; }
+  online=false
+  command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 && online=true
+  found=() cleaned=() failed=()
+  for d in "$repo"/.team/[0-9][0-9][0-9]-*/; do
+    d=${d%/}
+    st="$d/state.json"
+    [ -f "$st" ] || continue
+    w=$(jq -r '.worktree // empty' "$st")
+    [ -n "$w" ] && [ -d "$w" ] || continue
+    if [ "$online" = true ] && [ "$(jq -r '.pr.state // empty' "$st")" != MERGED ]; then
+      "$TEAM/bin/team-respond" "$d" peek >/dev/null 2>&1 || true
+    fi
+    b=$(jq -r '.branch // empty' "$st") base=$(jq -r '.base_ref // empty' "$st")
+    if [ "$(jq -r '.pr.state // empty' "$st")" = MERGED ]; then why="pr merged"
+    elif [ -n "$b" ] && [ -n "$base" ] && git -C "$repo" merge-base --is-ancestor "$b" "$base" 2>/dev/null &&
+      [ "$(git -C "$repo" rev-parse "$b")" != "$(jq -r '.base_sha // empty' "$st")" ] &&
+      [ "$(git -C "$repo" rev-list --count "$(jq -r '.base_sha // empty' "$st")..$b" 2>/dev/null || echo 0)" -gt 0 ]; then
+      why="branch in $base"
+    else continue
+    fi
+    found+=("$(jq -nc --arg d "$d" --arg w "$w" --arg r "$why" '{feature_dir: $d, worktree: $w, reason: $r}')")
+    [ "$dry" = true ] && continue
+    if res=$("$0" "$d"); then cleaned+=("$res"); else failed+=("$res"); fi
+  done
+  arr() { printf '%s\n' "$@" | jq -sc 'map(select(. != null))'; }
+  jq -n --argjson dry "$dry" --argjson f "$(arr "${found[@]+"${found[@]}"}")" \
+    --argjson c "$(arr "${cleaned[@]+"${cleaned[@]}"}")" --argjson x "$(arr "${failed[@]+"${failed[@]}"}")" \
+    '{ok: ($x | length == 0), dry_run: $dry, merged: $f, cleaned: $c, failed: $x}'
+  [ "$dry" = true ] || [ ${#failed[@]} -eq 0 ]
+  exit
+fi
 
 dir=$(cd "${1:?usage: team-clean <feature_dir> [--force]}" && pwd)
 force=${2:-}
