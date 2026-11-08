@@ -7,6 +7,18 @@ setup() {
   REPO_ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd)
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
+  unset CLAUDE_CONFIG_DIR
+}
+
+@test "with CLAUDE_CONFIG_DIR, install goes there and still links ~/.claude/team" {
+  CLAUDE_CONFIG_DIR="$HOME/cfg" run "$REPO_ROOT/install.sh"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$HOME/cfg/team")" = "$REPO_ROOT/team" ]
+  [ "$(readlink "$HOME/cfg/skills/team-dev")" = "$REPO_ROOT/skills/team-dev" ]
+  [ "$(readlink "$HOME/.claude/team")" = "$REPO_ROOT/team" ]
+  [ ! -e "$HOME/.claude/skills" ]
+  CLAUDE_CONFIG_DIR="$HOME/cfg" run "$REPO_ROOT/install.sh" --uninstall
+  [ ! -e "$HOME/cfg/team" ]; [ ! -e "$HOME/.claude/team" ]
 }
 
 @test "install links agents, skills and team/, and is idempotent" {

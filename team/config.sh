@@ -33,10 +33,16 @@ TEAM_DEVELOPER_EFFORT=${TEAM_DEVELOPER_EFFORT:-medium}
 TEAM_REVIEW_MODEL=${TEAM_REVIEW_MODEL:-gpt-6-astra}
 TEAM_REVIEW_EFFORT=${TEAM_REVIEW_EFFORT:-high}
 
-# Security reviewer: a second Codex pass, only on the first code review of a feature, focused on
-# authorization, tenant isolation, untrusted input and data exposure. Runs in parallel with the
-# general reviewer; its findings get ids R1-SNN. Set to 0 to disable.
+# Security reviewer: a second Codex pass on the first code review of a feature and on the first
+# review of each /team-respond round, focused on authorization, tenant isolation, untrusted input
+# and data exposure. Runs in parallel with the general reviewer; its findings get ids R<n>-SNN.
+# Set to 0 to disable.
 TEAM_SECURITY_REVIEW=${TEAM_SECURITY_REVIEW:-1}
+
+# Language of the Reviewer's prose (findings, tasks, reports), as you would write it after "en"
+# in Spanish ("inglés") or in that language ("English"). Empty: the language spec.md is written
+# in. Report headings and task ids stay as they are, other scripts parse them.
+TEAM_LANG=${TEAM_LANG:-}
 
 # One git worktree per feature, so several features can be planned and developed at once.
 # /team-plan creates it at TEAM_WORKTREE_ROOT/NNN-slug (default: ../<repo>.worktrees/ next to

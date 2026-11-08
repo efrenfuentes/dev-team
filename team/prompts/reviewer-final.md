@@ -55,4 +55,5 @@ mal, regresó), y qué hay que hacer concretamente. Más las tareas de tasks.md 
 ```
 
 Basa cada afirmación en el código y en los commits, no en lo que dicen las tareas marcadas.
-Escribe en español.
+Escribe el texto en {{LANGUAGE}}, pero **conserva los encabezados `##` tal cual** están arriba:
+otros scripts los buscan por su nombre para armar la PR.

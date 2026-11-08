@@ -2,9 +2,13 @@ export const meta = {
   name: 'dev-team',
   description: 'Developer (Opus) ↔ Reviewer (Astra 6 via Codex) loop over a planned feature, capped by TEAM_MAX_CODE_REVIEWS, then a final report',
   whenToUse: 'After /team-plan produced spec.md, plan.md and tasks.md in a .team/ feature directory',
+  // meta must be a literal, so the phases cannot follow TEAM_MAX_CODE_REVIEWS: these cover the
+  // default (6) plus a /team-respond round (TEAM_RESPOND_REVIEWS = 2). An iteration beyond them
+  // still runs; the Workflow tool just gives its phase() its own progress group.
   phases: [
     { title: 'Iteración 1' }, { title: 'Iteración 2' }, { title: 'Iteración 3' },
     { title: 'Iteración 4' }, { title: 'Iteración 5' }, { title: 'Iteración 6' },
+    { title: 'Iteración 7' }, { title: 'Iteración 8' },
     { title: 'Cierre' },
     { title: 'Aprendizaje' },
   ],

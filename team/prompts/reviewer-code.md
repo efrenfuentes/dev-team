@@ -42,7 +42,8 @@ aparecer en `previous_findings` con su estado tras esta iteración:
 ## Alcance de la revisión
 
 - **Iteración 1**: revisa todo el diff acumulado a fondo. Un reviewer de seguridad hace en
-  paralelo una pasada dedicada a autorización, aislamiento y entrada no confiable.
+  paralelo una pasada dedicada a autorización, aislamiento y entrada no confiable (también en la
+  primera revisión de cada ronda de comentarios de la PR).
 - **Iteraciones siguientes**: revisa a fondo el diff de esta iteración y verifica uno por uno
   los hallazgos previos abiertos. Usa el diff acumulado solo para comprobar que lo tocado en esta
   iteración no rompe lo anterior (regresiones). No vuelvas a revisar desde cero lo que ya
@@ -97,6 +98,6 @@ aparecer en `previous_findings` con su estado tras esta iteración:
 - Cada `blocker`/`major` necesita una `task` accionable: qué cambiar y dónde, verificable. Para
   los `minor` deja `task` como cadena vacía; para los `human`, `task` es lo que debe hacer la persona.
 - `location`: `ruta/archivo:línea` cuando aplique, o la ruta o el área si es general.
-- Escribe `summary`, `title`, `detail` y `task` en español, concisos.
+- Escribe `summary`, `title`, `detail` y `task` en {{LANGUAGE}}, concisos.
 
 Responde únicamente con el JSON del schema.

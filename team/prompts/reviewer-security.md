@@ -11,7 +11,10 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 - Carpeta de la feature: `{{FEATURE_DIR}}`: `spec.md` (requisitos), `plan.md`, `tasks.md`.
   **No leas `dev-log.md`.** Juzga el código.
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz.
-- Cambios a revisar: `git diff {{BASE_SHA}}..{{HEAD_SHA}}` y `git log --oneline {{BASE_SHA}}..{{HEAD_SHA}}`.
+- Cambios a revisar: `git diff {{PREV_SHA}}..{{HEAD_SHA}}` (iteración {{ITER}}; en la primera
+  revisión coincide con todo lo acumulado, `git diff {{BASE_SHA}}..{{HEAD_SHA}}`). Si no es la
+  primera, esta pasada es por una ronda de comentarios de la PR: revisa a fondo lo nuevo y usa el
+  acumulado solo para seguir sus efectos.
   Sigue cada cambio hasta el código existente que lo rodea: un hueco suele estar en lo que **no**
   se cambió (una consulta sin filtrar, una ruta sin política).
 
@@ -54,7 +57,7 @@ seguridad: eso lo hace el otro reviewer.
 - Cada `blocker`/`major` necesita una `task` accionable y verificable: qué cambiar y dónde. Para
   los `minor`, `task` vacío.
 - `location`: `ruta/archivo:línea` cuando aplique, o la ruta o el área si es general.
-- `previous_findings` siempre vacío: esta es la primera revisión.
-- Escribe `summary`, `title`, `detail` y `task` en español, concisos.
+- `previous_findings` siempre vacío: el seguimiento de hallazgos previos lo hace el otro reviewer.
+- Escribe `summary`, `title`, `detail` y `task` en {{LANGUAGE}}, concisos.
 
 Responde únicamente con el JSON del schema.

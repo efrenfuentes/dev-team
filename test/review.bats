@@ -132,6 +132,34 @@ review() { run --separate-stderr "$BIN/team-review" "$@"; }
   grep -q 'git diff abc1234\.\.' "$(find "$FAKE_DIR/prompts" -name '*-code.md' | sort -V | tail -1)"
 }
 
+@test "the security pass also runs on the first review of a respond round" {
+  codex_says code APPROVED
+  review code "$DIR" 1
+  jq '.respond.pending = {round: 1, from_iter: 3} | .review_budget = 8' "$DIR/state.json" >s && mv s "$DIR/state.json"
+  codex_says security CHANGES_REQUESTED "[$(finding blocker idor)]"
+  review code "$DIR" 2
+  [ "$(find "$FAKE_DIR/prompts" -name '*-security.md' | wc -l)" -eq 1 ]
+  review code "$DIR" 3
+  [ "$(find "$FAKE_DIR/prompts" -name '*-security.md' | wc -l)" -eq 2 ]
+  [ "$(jq -c '[.verdict, .findings[0].id]' "$DIR/reviews/code-3.json")" = '["CHANGES_REQUESTED","R3-S01"]' ]
+  grep -q 'iteración 3' "$(find "$FAKE_DIR/prompts" -name '*-security.md' | sort -V | tail -1)"
+}
+
+@test "the reviewer writes in TEAM_LANG, or in the spec's language by default" {
+  codex_says code APPROVED
+  review code "$DIR" 1
+  grep -q 'en el idioma en que está escrito spec.md, concisos' "$FAKE_DIR"/prompts/*-code.md
+  TEAM_LANG=inglés review code "$DIR" 2
+  grep -q 'en inglés, concisos' "$(find "$FAKE_DIR/prompts" -name '*-code.md' | sort -V | tail -1)"
+}
+
+@test "a plan review with only minors is approved too" {
+  codex_says plan CHANGES_REQUESTED "[$(finding minor detalle)]"
+  review plan "$DIR" 1
+  [ "$(jq -c '[.verdict, .blocking]' <<<"$output")" = '["APPROVED",0]' ]
+  [ "$(jq -r .model_verdict "$DIR/reviews/plan-1.json")" = CHANGES_REQUESTED ]
+}
+
 @test "a Codex failure is an ERROR verdict and writes nothing" {
   FAKE_CODEX_FAIL=code review code "$DIR" 1
   [ "$status" -ne 0 ]

@@ -17,6 +17,9 @@ links=()
 for f in "$src"/agents/*.md; do links+=("$claude/agents/$(basename "$f")|$f"); done
 for d in "$src"/skills/*/;   do d=${d%/}; links+=("$claude/skills/$(basename "$d")|$d"); done
 links+=("$claude/team|$src/team")
+# The skills and agents name ~/.claude/team/bin/… in their text, so with another config dir the
+# scripts are linked there too (the scripts themselves resolve lib.sh through CLAUDE_CONFIG_DIR).
+[ "$claude" = "$HOME/.claude" ] || links+=("$HOME/.claude/team|$src/team")
 
 uninstall() {
   for pair in "${links[@]}"; do
@@ -40,6 +43,7 @@ install() {
       mv "$dst" "$backup/"
       echo "respaldado $dst → $backup/"
     fi
+    mkdir -p "$(dirname "$dst")"
     ln -s "$from" "$dst"
     echo "enlazado   $dst → $from"
   done

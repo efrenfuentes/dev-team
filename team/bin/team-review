@@ -25,6 +25,9 @@ cd "$repo"
 export CODEX_HOME="${TEAM_CODEX_HOME:-$HOME/.codex}"
 model=$TEAM_REVIEW_MODEL
 effort=$TEAM_REVIEW_EFFORT
+# Language of the reviewer's prose ({{LANGUAGE}} in the prompts): TEAM_LANG, or the spec's own.
+export LANGUAGE
+LANGUAGE=$([ -n "${TEAM_LANG:-}" ] && echo "$TEAM_LANG" || echo "el idioma en que está escrito spec.md")
 
 export FEATURE_DIR="$dir" ITER="$n" FINAL_STATUS="$final_status"
 MAX_ITER=$(team_review_budget "$dir")
@@ -166,9 +169,11 @@ case "$mode" in
     # passing test suite.
     GATES_PASSED=$([ -f "$gates_json" ] && jq -r 'if .configured == false then "none" else .passed end' "$gates_json" || echo "unknown")
 
-    # First review only: a security-focused pass runs in parallel with the general one.
+    # A security-focused pass runs in parallel with the general one on the first review, and on
+    # the first review of a /team-respond round (new code asked for on the PR).
     sec_pid=""
-    if [ "$n" = 1 ] && [ "${TEAM_SECURITY_REVIEW:-1}" = 1 ]; then
+    respond_from=$(jq -r '.respond.pending.from_iter // empty' "$dir/state.json")
+    if { [ "$n" = 1 ] || [ "$n" = "$respond_from" ]; } && [ "${TEAM_SECURITY_REVIEW:-1}" = 1 ]; then
       render reviewer-security >"$tmp/prompt-sec.md"
       ( run_codex "$tmp/prompt-sec.md" "$tmp/raw-sec.json" "$TEAM/schemas/verdict.json" security >"$tmp/sec-error.json" ) &
       sec_pid=$!

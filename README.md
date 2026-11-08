@@ -8,7 +8,7 @@ cualquier repo:
 | **Planner** (`team-planner`) | Claude Opus | high | Explora el código, te hace preguntas y escribe `spec.md`, `plan.md` y `tasks.md` |
 | **Developer** (`team-developer`) | Claude Opus | medium | Hace las tareas, escribe los tests y hace commits (Conventional Commits, sin push) |
 | **Reviewer** (Codex CLI) | OpenAI `gpt-6-astra` | high | Revisa el plan y el código en modo solo lectura, y agrega tareas de corrección |
-| **Reviewer de seguridad** (Codex CLI) | OpenAI `gpt-6-astra` | high | Solo en la primera revisión de código: autorización, aislamiento por cuenta, entrada no confiable y exposición de datos. Corre en paralelo al Reviewer; sus hallazgos son `R1-SNN` |
+| **Reviewer de seguridad** (Codex CLI) | OpenAI `gpt-6-astra` | high | En la primera revisión de código y en la primera de cada ronda de `/team-respond`: autorización, aislamiento por cuenta, entrada no confiable y exposición de datos. Corre en paralelo al Reviewer; sus hallazgos son `R<n>-SNN` |
 | **Runner** (`team-runner`) | Claude Haiku | low | Corre los gates y el reviewer, y devuelve su JSON sin interpretarlo |
 
 ## Instalación
@@ -34,9 +34,9 @@ git clone <url-de-este-repo> ~/Developer/dev-team
 Reinicia Claude Code después de instalar.
 
 > Las rutas `~/.claude/team/...` están fijas en las skills y los scripts, así que la
-> instalación siempre va en `~/.claude` del usuario. Los scripts e `install.sh` respetan
-> `CLAUDE_CONFIG_DIR` si está definido, pero las skills y los agentes siguen nombrando
-> `~/.claude/team/bin/…` en su texto.
+> instalación siempre va en `~/.claude` del usuario. Si usas `CLAUDE_CONFIG_DIR`, `install.sh`
+> pone los agentes, las skills y `team` ahí, y además enlaza `~/.claude/team` para que esas rutas
+> sigan funcionando; los scripts resuelven `lib.sh` por `CLAUDE_CONFIG_DIR`.
 
 ## Requisitos
 
@@ -113,6 +113,15 @@ dev-log anteriores en `.team/NNN-slug/archive/` y vuelve a empezar; los commits 
 | `blocker` / `major` | sí | Genera una tarea `R<n>-NN` en `tasks.md`. Si en la siguiente revisión sigue abierta, se **reabre la misma tarea** con la nota del Reviewer; no se crea otra. |
 | `minor` | no | Solo aparece en el reporte. |
 | `human` | no | Algo que solo una persona puede hacer (prueba manual con un cliente real, anotar la PR, un entorno externo). Va al reporte y al informe final, no al Developer. |
+
+El veredicto lo deriva el script de los hallazgos, no el modelo: con un `blocker`/`major` abierto
+(nuevo o de una revisión anterior) es `CHANGES_REQUESTED`; sin ninguno, `APPROVED`, aunque el
+Reviewer haya dicho lo contrario (lo que dijo queda como `model_verdict`). Aplica igual al plan y
+al código: una revisión que solo deja `minor` aprueba.
+
+El Reviewer escribe en el idioma de `spec.md`, o en el de `TEAM_LANG` si lo defines; los
+encabezados de los informes y los ids de las tareas no cambian, porque otros scripts los leen.
+Las convenciones aprendidas (`conventions.md`) se escriben siempre en español.
 
 Por eso el Planner no escribe tareas `T…` que el Developer no pueda verificar solo: lo que
 necesita a una persona va en `## Verificación manual (persona)` de `tasks.md`, sin checkbox.
@@ -200,10 +209,11 @@ una sola ejecución con variables de entorno:
 | `TEAM_DEVELOPER_MODEL` / `TEAM_DEVELOPER_EFFORT` | `opus` / `medium` |
 | `TEAM_REVIEW_MODEL` / `TEAM_REVIEW_EFFORT` | `gpt-6-astra` / `high` |
 | `TEAM_MAX_PLAN_ROUNDS` | `5` |
-| `TEAM_MAX_CODE_REVIEWS` | `6` |
+| `TEAM_MAX_CODE_REVIEWS` | `6` (más de 8 iteraciones en total siguen funcionando, pero `/workflows` las muestra fuera de las fases declaradas) |
 | `TEAM_GATE_FIX_ROUNDS` | `2` (0 manda los gates en rojo directo a revisión) |
 | `TEAM_RESPOND_REVIEWS` | `2` (revisiones extra por ronda de `/team-respond`) |
 | `TEAM_SECURITY_REVIEW` | `1` (0 la desactiva) |
+| `TEAM_LANG` | vacío (el idioma de `spec.md`); p. ej. `inglés` o `English` |
 | `TEAM_WORKTREES` | `1` (0 trabaja en el checkout actual, como antes) |
 | `TEAM_WORKTREE_ROOT` | `../<repo>.worktrees` |
 | `TEAM_BRANCH_PREFIX` | `feat/` |

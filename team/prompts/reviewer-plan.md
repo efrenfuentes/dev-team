@@ -52,6 +52,6 @@ Cada uno debe aparecer en `previous_findings` con su estado tras la revisión de
   (archivo, sección, patrón existente) y después la interpretación.
 - Cada `blocker`/`major` necesita una `task`: qué cambiar en spec, plan o tareas. Para los
   `minor` deja `task` vacío. `location`: archivo y sección (por ejemplo, `plan.md#Migraciones`).
-- Escribe en español, conciso.
+- Escribe en {{LANGUAGE}}, conciso.
 
 Responde únicamente con el JSON del schema.
