@@ -5,6 +5,8 @@
 #   api graphql → $FAKE_DIR/graphql-<n>.json for the PR number n (-F n=<n>), else $FAKE_DIR/graphql.json
 #   api repos/… → {"html_url": …}; the -f body= value is appended to $FAKE_DIR/gh-bodies.log
 #   run view    → $FAKE_DIR/run-log.txt (fails without it)
+#   issue view  → $FAKE_DIR/issue-<n>.json (fails without it)
+#   repo view   → $FAKE_GH_REPO (default o/r), as for --json nameWithOwner -q .nameWithOwner
 # FAKE_GH_AUTH=0 makes `auth status` fail.
 set -u
 { printf 'gh'; printf ' %q' "$@"; echo; } >>"$FAKE_DIR/gh.log"
@@ -19,6 +21,8 @@ case "$1 ${2:-}" in
     n=""
     for a in "$@"; do case "$a" in n=*) n=${a#n=} ;; esac; done
     if [ -n "$n" ] && [ -f "$FAKE_DIR/graphql-$n.json" ]; then cat "$FAKE_DIR/graphql-$n.json"; else cat "$FAKE_DIR/graphql.json"; fi ;;
+  "issue view") cat "$FAKE_DIR/issue-$3.json" 2>/dev/null || { echo "issue $3 not found" >&2; exit 1; } ;;
+  "repo view") echo "${FAKE_GH_REPO:-o/r}" ;;
   "run view") cat "$FAKE_DIR/run-log.txt" 2>/dev/null || { echo "log not found" >&2; exit 1; } ;;
   api\ repos/*)
     for a in "$@"; do case "$a" in body=*) printf '%s\n---\n' "${a#body=}" >>"$FAKE_DIR/gh-bodies.log" ;; esac; done

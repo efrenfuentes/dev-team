@@ -54,7 +54,10 @@ explicitly asked for these settings.
    same `args`.
    The workflow owns the Reviewer ↔ Planner loop and its limit. Do not run review rounds or
    planner revisions yourself, before or after it. Tell the user they can follow it in
-   `/workflows`, and wait for it to complete. If it stopped early, report why; running
+   `/workflows`, and wait for it to complete. Record the run as soon as it completes: `~/.claude/team/bin/team-metrics "DIR" run plan` with
+   `--tokens`, `--duration-ms` and `--agents` from the completion notice's usage
+   (`subagent_tokens`, `duration_ms`, `agent_count`); leave out any it does not give.
+   If it stopped early, report why; running
    `/team-plan` again on the same feature resumes at the next round.
 
 6. **Hand off to the user.** Summarize in a few lines: the requirements, the number of

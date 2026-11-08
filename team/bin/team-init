@@ -22,13 +22,7 @@ base_ref=${2:-}
 main=$(team_main_repo)
 
 if [ -z "$base_ref" ]; then
-  base_ref=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
-  if [ -z "$base_ref" ]; then
-    for candidate in origin/develop origin/main origin/master; do
-      git rev-parse --verify -q "$candidate" >/dev/null 2>&1 && { base_ref=$candidate; break; }
-    done
-  fi
-  [ -n "$base_ref" ] || { echo "cannot detect a base branch; pass it: team-init $slug <base_ref>" >&2; exit 1; }
+  base_ref=$(team_default_base) || { echo "cannot detect a base branch; pass it: team-init $slug <base_ref>" >&2; exit 1; }
 fi
 git rev-parse --verify -q "$base_ref^{commit}" >/dev/null || { echo "unknown base ref: $base_ref" >&2; exit 1; }
 

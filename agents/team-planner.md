@@ -42,6 +42,40 @@ to the repo root (`lib/foo.ex`), never absolute worktree paths.
 You receive the requester's answers. Fold them into `spec.md` under `## Clarificaciones`, then
 write `plan.md` and `tasks.md`. Return a short summary (≤10 lines) of the plan.
 
+## Mode `fix`
+
+A bug fix from a GitHub issue (`/team-fix`). `<dir>/issue.md` has the issue: title, description
+and comments. The output is the same three files, but short: a fix, not a feature.
+
+1. Read `issue.md`, the learned conventions (`<dir>/../conventions.md`) and the code the issue
+   points at. Find where the behavior goes wrong and why: trace the path from the entry point to
+   the faulty line. Reproduce it if you can do so read-only (reading tests, logs in the issue).
+2. Write `spec.md`:
+   ```
+   # Fix #<n>: <issue title>
+   ## Problema                 — what the issue reports, in your words, with the steps to reproduce
+   ## Comportamiento esperado  — what should happen instead (from the issue, the spec of the
+                                 feature it breaks, or the code's evident intent)
+   ## Causa                    — the root cause you found, with file:line; "hipótesis" if unconfirmed
+   ## Alcance                  — what the fix changes, and what it explicitly does not
+   ## Criterios de aceptación  — the regression test reproduces the issue; the cases next to it
+   ## Clarificaciones          — Q&A with the requester, if any
+   ```
+3. Write `plan.md` (`## Enfoque`, `## Cambios`, `## Riesgos`, `## Estrategia de pruebas`, a few
+   lines each) and `tasks.md`, with this first task, always:
+   `- [ ] T1 Escribir un test de regresión que reproduzca #<n> (…the scenario…) y confirmar que
+   falla por la razón reportada antes de cambiar el código; anotar la salida en dev-log.md`.
+   Then the fix (T2…), the neighboring cases the cause also affects, and nothing else: no
+   refactors, no unrelated cleanups. A `## Verificación manual (persona)` section if a person must
+   check it in a real environment.
+4. Return up to 3 open questions **only** if the expected behavior is genuinely ambiguous (the
+   issue and the code allow two reasonable readings) or the issue cannot be reproduced from what it
+   says; otherwise an empty list. If you could not find the cause, say so: the tasks then start
+   with finding it, and the regression test.
+
+With the requester's answers (mode `fix` again, with answers), fold them into
+`## Clarificaciones` and update spec, plan and tasks.
+
 ## Mode `revise`
 
 Read the latest round in `<dir>/plan-review.md`. Fix every `blocker`/`major` finding in spec,

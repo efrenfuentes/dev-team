@@ -1,7 +1,7 @@
 ---
 name: team-status
 description: Show the status of every dev-team feature in the current repo — phase (planning, planned, developing, responding, approved, incomplete, merged, closed), branch, plan rounds, code iterations, open tasks, items that need a person, and the PR with its CI and unanswered comments. Use when the user runs /team-status or asks where the team's features stand.
-argument-hint: "[--json] [--offline]"
+argument-hint: "[--json] [--offline] [--metrics]"
 ---
 
 # /team-status — where every feature stands
@@ -31,6 +31,13 @@ Arguments: $ARGUMENTS
    handles its review comments and failing CI, and `/team-sync NNN` brings in the base's new
    commits. Once the branch is merged, `/team-clean NNN` removes the worktree. The worktree path of each feature is in `--json`; give it when
    the user asks where a feature's code is.
+With `--metrics`, run `~/.claude/team/bin/team-status --metrics` instead and show its table and
+totals: per feature, plan rounds, iterations until approval, Reviewer findings by severity
+(blocker/major/minor/human), gate repair rounds, R/H/C tasks, recorded tokens and hours from
+creation to approval and to merge. Point out what stands out (a feature that needed many
+iterations, many gate repairs) and, if the user asks, what to tune: models and efforts in
+`~/.claude/team/config.sh`, or rules for `.team/conventions.md`. Then stop.
+
 3. If any feature has items "para persona", point to `tasks.md` (`## Verificación manual`) and
    the "Requiere a una persona" sections of `review-report.md`.
 

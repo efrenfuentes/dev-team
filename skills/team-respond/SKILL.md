@@ -62,6 +62,9 @@ comments. Pushing and posting on the PR are outward-facing: confirm each with th
    `readlink -f ~/.claude/team/dev-team.js`) and pass its full contents as `script` instead, with the
    same `args`. Tell the user they
    can follow it in `/workflows`, and wait for it.
+   Record the run as soon as it completes: `~/.claude/team/bin/team-metrics "DIR" run respond` with
+   `--tokens`, `--duration-ms` and `--agents` from the completion notice's usage
+   (`subagent_tokens`, `duration_ms`, `agent_count`); leave out any it does not give.
    If it ends without approval (`approved: false`) or stopped early, report why and what is
    still open (`DIR/final-report.md`), and ask whether to push and reply anyway or stop there.
 

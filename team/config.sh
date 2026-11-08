@@ -45,6 +45,8 @@ TEAM_SECURITY_REVIEW=${TEAM_SECURITY_REVIEW:-1}
 TEAM_WORKTREES=${TEAM_WORKTREES:-1}
 TEAM_WORKTREE_ROOT=${TEAM_WORKTREE_ROOT:-}
 TEAM_BRANCH_PREFIX=${TEAM_BRANCH_PREFIX:-feat/}
+# Branch prefix of the bug fixes /team-fix starts from a GitHub issue.
+TEAM_FIX_BRANCH_PREFIX=${TEAM_FIX_BRANCH_PREFIX:-fix/}
 
 # Run the gates of the same repo one at a time (for projects whose tests can't be isolated with
 # TEAM_PARTITION). A <repo>/.team/serialize-gates file turns it on for one repo only.

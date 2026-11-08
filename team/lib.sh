@@ -51,6 +51,19 @@ team_project_script() { # <kind: gates|setup|teardown> <feature_dir>
   return 1
 }
 
+# Default base branch of the repo in the current directory: the remote's default branch
+# (origin/HEAD), then the first of origin/develop, origin/main, origin/master that exists.
+team_default_base() {
+  local b candidate
+  b=$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  if [ -z "$b" ]; then
+    for candidate in origin/develop origin/main origin/master; do
+      git rev-parse --verify -q "$candidate" >/dev/null 2>&1 && { b=$candidate; break; }
+    done
+  fi
+  [ -n "$b" ] && echo "$b"
+}
+
 # Stack of a checkout, by its marker files. Order matters: a Rails app has a package.json too.
 team_stack() { # <worktree>
   local d=$1

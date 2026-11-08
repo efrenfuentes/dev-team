@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Check that a repo is ready for the dev team, before a cycle finds out halfway. Read-only.
+#
+#   team-doctor [--json]
+#
+# Run it from anywhere inside the repo. Each check is ok, info, warn or fail, with a detail and,
+# when it is not ok, how to fix it:
+#   tools      git, jq and perl; codex (the Reviewer); gh with a login (/team-ship, /team-respond,
+#              /team-fix)
+#   repo       the origin remote and the base branch the features are cut from
+#   stack      the detected stack, and its tools on PATH
+#   gates      which gate script the loop will run (project, repo or the stack's default)
+#   setup      which worktree setup will run
+#   partition  whether parallel features get their own test database
+#   files      ignored files of the main checkout a fresh worktree would lack (.env, keys), and
+#              whether .team/worktree-files lists them
+#   context    CLAUDE.md / AGENTS.md for the agents, and the learned conventions
+# Exits 1 when any check fails.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+checks=()
+add() { # <id> <ok|info|warn|fail> <detail> [fix]
+  checks+=("$(jq -nc --arg id "$1" --arg s "$2" --arg d "$3" --arg f "${4:-}" \
+    '{id: $id, status: $s, detail: $d, fix: (if $f == "" then null else $f end)}')")
+}
+has() { command -v "$1" >/dev/null 2>&1; }
+
+json=false
+[ "${1:-}" = --json ] && json=true
+
+# --- tools
+missing=()
+for t in git jq perl; do has "$t" || missing+=("$t"); done
+if [ ${#missing[@]} -eq 0 ]; then add tools.base ok "git, jq and perl are installed"
+else add tools.base fail "missing: ${missing[*]}" "install them; every team script needs them"
+fi
+if ! has codex; then add tools.codex fail "codex (the Reviewer's CLI) is not installed" "install the Codex CLI and log in: codex login"
+elif codex login status </dev/null >/dev/null 2>&1; then add tools.codex ok "codex is installed and logged in"
+else add tools.codex warn "codex is installed, but 'codex login status' did not confirm a login" "codex login"
+fi
+if ! has gh; then add tools.gh warn "gh is not installed: /team-ship, /team-respond, /team-fix and the PR columns of /team-status need it" "install the GitHub CLI and run: gh auth login"
+elif gh auth status </dev/null >/dev/null 2>&1; then add tools.gh ok "gh is installed and logged in"
+else add tools.gh warn "gh is installed but not logged in" "gh auth login"
+fi
+
+# --- repo
+if ! main=$(team_main_repo 2>/dev/null); then
+  add repo fail "not inside a git repository" "run it from the repo the team will work on"
+  main=""
+fi
+
+if [ -n "$main" ]; then
+  cd "$main" || exit 1
+  if url=$(git remote get-url origin 2>/dev/null); then add repo.remote ok "origin: $url"
+  else add repo.remote warn "no 'origin' remote: features cannot be shipped or synced" "git remote add origin <url>"
+  fi
+  if base=$(team_default_base); then add repo.base ok "features are cut from $base"
+  else add repo.base fail "cannot detect the base branch (origin/HEAD, origin/develop, origin/main, origin/master)" \
+    "git remote set-head origin --auto, or pass the base to /team-plan"
+  fi
+
+  # --- stack and its tools
+  stack=$(team_stack "$main" || true)
+  if [ -z "$stack" ]; then
+    add stack info "no known stack (mix.exs, Gemfile, go.mod, Cargo.toml, pyproject.toml/setup.py/requirements.txt, package.json)"
+  else
+    need=()
+    case "$stack" in
+      elixir) need=(mix) ;;
+      ruby) need=(bundle) ;;
+      go) need=(go gofmt) ;;
+      rust) need=(cargo) ;;
+      python)
+        if [ -f uv.lock ]; then need=(uv); elif [ -f poetry.lock ]; then need=(poetry); else need=(python3); fi ;;
+      node)
+        if [ -f pnpm-lock.yaml ]; then need=(pnpm); elif [ -f yarn.lock ]; then need=(yarn)
+        elif [ -f bun.lockb ] || [ -f bun.lock ]; then need=(bun); else need=(npm); fi ;;
+    esac
+    absent=()
+    for t in "${need[@]}"; do has "$t" || absent+=("$t"); done
+    if [ ${#absent[@]} -eq 0 ]; then add stack ok "$stack (${need[*]} on PATH)"
+    else add stack fail "$stack, but not on PATH: ${absent[*]}" "install them, or activate the repo's toolchain (mise, asdf) in the shell Claude Code runs in"
+    fi
+  fi
+
+  # --- gates (the same lookup as team-gates, from the main checkout)
+  if [ -f "$main/.team/gates.sh" ]; then add gates ok "the project's own: .team/gates.sh"
+  elif [ -f "$TEAM/gates/$(basename "$main").sh" ]; then add gates ok "this repo's script in the team: $TEAM/gates/$(basename "$main").sh"
+  elif [ "${TEAM_STACK_GATES:-1}" = 1 ] && script=$(team_stack_script "$main" gates); then
+    add gates ok "the default gates of the $stack stack: $script"
+  else
+    add gates warn "no gates: the loop goes to review without running tests or lint" \
+      "write .team/gates.sh (it must exit non-zero on failure; see the README, Gates por proyecto)"
+  fi
+
+  # --- setup
+  if [ -f "$main/.team/setup.sh" ]; then add setup ok "the project's own: .team/setup.sh"
+  elif [ -f "$TEAM/setup/$(basename "$main").sh" ]; then add setup ok "this repo's script in the team: $TEAM/setup/$(basename "$main").sh"
+  elif script=$(team_stack_script "$main" setup); then add setup ok "the default setup of the $stack stack: $script"
+  else add setup info "no worktree setup: a new worktree gets no dependencies" "write .team/setup.sh if the project needs one"
+  fi
+
+  # --- test database partition (parallel features)
+  serialized=false
+  if [ -f "$main/.team/serialize-gates" ] || [ "${TEAM_GATES_LOCK:-0}" = 1 ]; then serialized=true; fi
+  case "$stack" in
+    elixir)
+      if ! grep -q ':ecto_sql' mix.exs 2>/dev/null; then add partition ok "no Ecto database"
+      elif grep -rqs 'MIX_TEST_PARTITION' config/; then add partition ok "config/ names the test database with MIX_TEST_PARTITION"
+      elif [ "$serialized" = true ]; then add partition ok "gates run one at a time (.team/serialize-gates or TEAM_GATES_LOCK)"
+      else add partition warn "config/ does not use MIX_TEST_PARTITION: parallel features share the test database" \
+        'add #{System.get_env("MIX_TEST_PARTITION")} to the test database name in config/test.exs, or create .team/serialize-gates'
+      fi ;;
+    ruby)
+      if [ ! -f config/database.yml ]; then add partition ok "no config/database.yml"
+      elif grep -qs sqlite3 config/database.yml; then add partition ok "SQLite: each worktree has its own database file"
+      elif grep -qs TEAM_PARTITION config/database.yml; then add partition ok "config/database.yml names the test database with TEAM_PARTITION"
+      elif [ "$serialized" = true ]; then add partition ok "gates run one at a time (.team/serialize-gates or TEAM_GATES_LOCK)"
+      else add partition warn "config/database.yml does not use TEAM_PARTITION: parallel features share the test database" \
+        'test: database: myapp_test<%= ENV["TEAM_PARTITION"] %>, or create .team/serialize-gates'
+      fi ;;
+    *) add partition info "the team cannot tell whether this stack's tests share a database; if they do, use TEAM_PARTITION or create .team/serialize-gates" ;;
+  esac
+
+  # --- ignored files a fresh worktree would lack
+  listed=""
+  [ -f "$main/.team/worktree-files" ] && listed=$(sed 's/#.*//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$main/.team/worktree-files" | grep -v '^$' || true)
+  wanted=$(git ls-files --others --ignored --exclude-standard 2>/dev/null |
+    grep -E '(^|/)\.env(\.[^/]*)?$|^config/master\.key$|^config/credentials/[^/]*\.key$|(^|/)\.envrc$|^config/[^/]*\.secret\.exs$' |
+    grep -vE '\.(example|sample|template|dist)$' | grep -v '^\.team/' | sort || true)
+  unlisted=()
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -qxF "$f" <<<"$listed" || unlisted+=("$f")
+  done <<<"$wanted"
+  if [ -z "$wanted" ]; then add files ok "no ignored env or key files to copy into worktrees"
+  elif [ ${#unlisted[@]} -eq 0 ]; then add files ok ".team/worktree-files lists them: $(tr '\n' ' ' <<<"$wanted")"
+  else add files warn "ignored files a new worktree would lack: ${unlisted[*]}" \
+    "list them in .team/worktree-files, one per line (team-setup copies them)"
+  fi
+
+  # --- context
+  ctx=()
+  for f in CLAUDE.md AGENTS.md; do [ -f "$main/$f" ] && ctx+=("$f"); done
+  if [ ${#ctx[@]} -gt 0 ]; then add context ok "${ctx[*]} found: the agents follow it"
+  else add context warn "no CLAUDE.md or AGENTS.md: the agents and the Reviewer only learn the conventions from the code" \
+    "write one (/init in Claude Code drafts it)"
+  fi
+  if [ -f "$main/.team/conventions.md" ]; then
+    add conventions info "$(grep -c '^- ' "$main/.team/conventions.md") learned rules in .team/conventions.md"
+  else add conventions info "no learned conventions yet (they appear after the first dev loop)"
+  fi
+fi
+
+all=$(printf '%s\n' "${checks[@]}" | jq -s .)
+ok=$(jq 'all(.status != "fail")' <<<"$all")
+if [ "$json" = true ]; then
+  jq -n --arg r "${main:-}" --arg st "${stack:-}" --argjson ok "$ok" --argjson c "$all" \
+    '{ok: $ok, repo: (if $r == "" then null else $r end), stack: (if $st == "" then null else $st end), checks: $c}'
+else
+  jq -r '.[] | "\(.status | ascii_upcase)\t\(.id)\t\(.detail)" + (if .fix then "\n\t\t→ \(.fix)" else "" end)' <<<"$all" |
+    column -t -s $'\t'
+fi
+[ "$ok" = true ]

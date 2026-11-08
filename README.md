@@ -50,6 +50,8 @@ Reinicia Claude Code después de instalar.
 En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio worktree, ver
 [Worktrees](#worktrees)):
 
+0. **`/team-doctor`**, la primera vez en un repo: revisa que esté listo (ver
+   [Diagnóstico del repo](#diagnóstico-del-repo)).
 1. **`/team-plan <descripción de la feature> [--base origin/main]`**
    Crea el worktree de la feature en una rama nueva `feat/<slug>` desde la base y lo prepara.
    El Planner explora ese código y te hace preguntas. Luego escribe spec, plan y tareas, y el
@@ -89,6 +91,9 @@ En el repo del proyecto, desde cualquier rama (cada feature trabaja en su propio
    **`/team-clean --merged`** busca las features con worktree cuya PR está fusionada (o cuya rama
    ya está en la base), te las muestra y, con tu confirmación, las limpia todas. Nunca fuerza: un
    worktree con cambios sin commit queda como está y te lo reporta.
+
+Para un bug reportado en GitHub, **`/team-fix <issue>`** reemplaza los pasos 1 a 4 con un flujo
+corto y con el test primero (ver [Arreglar un issue](#arreglar-un-issue)).
 
 Puedes tener varias features a la vez: planifica una mientras otra está en `/team-dev`, o corre
 dos `/team-dev` en paralelo. Cada una tiene su worktree, su rama y su base de datos de test.
@@ -130,6 +135,58 @@ que se corrigió una vez no se vuelve a corregir. El Reviewer no lo lee a propó
 su propio criterio y no con reglas que el equipo sacó de sí mismo. Puedes editar o borrar
 cualquier regla; `TEAM_LEARN=0` apaga el aprendizaje (el archivo se sigue leyendo). El Developer corre los gates por su cuenta antes de cada commit.
 
+## Arreglar un issue
+
+`/team-fix <número o URL del issue> [--base <ref>] [--plan-only] [--review-plan]` (script:
+`~/.claude/team/bin/team-issue`):
+
+1. Lee el issue con `gh` (título, descripción, etiquetas y comentarios) y crea la feature
+   `NNN-fix-<n>-<título>` en una rama `fix/…` (`TEAM_FIX_BRANCH_PREFIX`), con el issue en
+   `.team/NNN-…/issue.md`. Si el issue ya tiene una feature, la retoma en vez de duplicarla.
+2. El Planner, en modo `fix`, busca la causa en el código y escribe una spec corta (problema,
+   comportamiento esperado, causa con `archivo:línea`, alcance) y tareas cuya primera siempre es
+   **T1: un test de regresión que reproduzca el issue y falle**. Solo pregunta si el
+   comportamiento esperado es ambiguo. El plan no pasa por la revisión de plan, salvo con
+   `--review-plan`: el Reviewer juzga el test y el arreglo en el ciclo.
+3. Corre el ciclo `dev-team`. El Developer escribe el test, comprueba que falla **por la razón
+   del issue**, lo commitea solo (`test(…): reproduce #n`) y después arregla la causa
+   (`fix(…): … (#n)`). Si el test pasa antes del arreglo, se detiene: el bug no está donde dice
+   la spec. El Reviewer exige el test de regresión y que el arreglo vaya a la causa, no al
+   síntoma.
+4. `/team-ship NNN` abre la PR con `Closes #n`, así que fusionarla cierra el issue. El equipo nunca
+   comenta, etiqueta ni cierra el issue por su cuenta.
+
+## Diagnóstico del repo
+
+`/team-doctor` (script: `~/.claude/team/bin/team-doctor [--json]`) revisa, sin cambiar nada:
+
+| Chequeo | Qué mira |
+|---|---|
+| `tools` | `git`, `jq`, `perl`; `codex` con sesión (el Reviewer); `gh` con sesión |
+| `repo` | el remoto `origin` y la rama base de las features |
+| `stack` | el stack detectado y sus herramientas en el `PATH` |
+| `gates`, `setup` | qué script de gates y de setup se usará |
+| `partition` | si las features en paralelo tienen su propia base de test |
+| `files` | archivos ignorados del checkout principal (`.env`, llaves) que a un worktree le faltarían y no están en `.team/worktree-files` |
+| `context` | `CLAUDE.md` / `AGENTS.md`, y las convenciones aprendidas |
+
+Cada chequeo es `ok`, `info`, `warn` o `fail` (con cómo arreglarlo). La skill ofrece arreglar lo
+local y seguro, siempre con tu confirmación: agregar los archivos a `.team/worktree-files`, crear
+`.team/serialize-gates`, o escribir un `.team/gates.sh` a partir del CI o el README del repo.
+
+## Métricas
+
+`/team-status --metrics` (script: `~/.claude/team/bin/team-metrics --repo [--json]`) muestra, por
+feature: rondas de plan, iteraciones hasta la aprobación, hallazgos del Reviewer por severidad
+(blocker/major/minor/human), rondas de reparación de gates, tareas `R`/`H`/`C`, tokens registrados
+y horas desde la creación hasta la aprobación y hasta el merge; al final, los promedios.
+
+Casi todo sale de lo que las features ya guardan (`reviews/`, `gates/`, `tasks.md`,
+`state.json`). Los tokens, la duración y los agentes de cada workflow los registran las skills al
+terminar (`team-metrics <feature_dir> run <tipo> --tokens N --duration-ms N --agents N`, en
+`state.json` como `metrics.runs`). `team-metrics <feature_dir>` da el detalle de una feature.
+Sirve para ajustar modelos y esfuerzos, o para ver qué reglas faltan en las convenciones.
+
 ## Configuración
 
 Todo está en [`team/config.sh`](team/config.sh). También puedes cambiar cualquier valor para
@@ -148,6 +205,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_WORKTREES` | `1` (0 trabaja en el checkout actual, como antes) |
 | `TEAM_WORKTREE_ROOT` | `../<repo>.worktrees` |
 | `TEAM_BRANCH_PREFIX` | `feat/` |
+| `TEAM_FIX_BRANCH_PREFIX` | `fix/` (ramas de `/team-fix`) |
 | `TEAM_PARTITION_BASE` | `100` (la feature `007` usa la partición `107`) |
 | `TEAM_GATES_LOCK` | `0` (1 corre los gates de un mismo repo de a uno) |
 | `TEAM_STACK_GATES` | `1` (0 apaga los gates por defecto del stack) |
@@ -364,12 +422,14 @@ la partición; nunca la del checkout principal), o con `<repo>/.team/teardown.sh
 
 ```
 agents/            definiciones de los subagentes de Claude Code
-skills/            /team-plan, /team-dev, /team-status, /team-ship, /team-respond, /team-sync y /team-clean
+skills/            /team-doctor, /team-plan, /team-fix, /team-dev, /team-status, /team-ship,
+                   /team-respond, /team-sync y /team-clean
 team/
   config.sh        modelos, esfuerzos y límites
   lib.sh           funciones compartidas por los scripts (worktree, entorno de la feature, lock)
-  bin/             team-init, team-setup, team-start, team-exec, team-config, team-gates,
-                   team-review, team-status, team-clean
+  bin/             team-init, team-issue, team-setup, team-start, team-exec, team-config,
+                   team-gates, team-await, team-review, team-status, team-metrics, team-doctor,
+                   team-ship, team-respond, team-sync, team-clean
   setup/stacks/    setup y teardown por defecto de cada stack (elixir, ruby, go, rust, python, node)
   plan-review.js   workflow Reviewer ↔ Planner
   dev-team.js      workflow Developer → gates → Reviewer

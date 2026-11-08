@@ -38,7 +38,10 @@ Running this skill is the user's explicit request to run the `dev-team` workflow
    model, effort, gate-repair limit and conventions learning the user chose.
    It runs in the background; tell the user they can follow it in `/workflows`.
 
-4. **When it completes**, read `DIR/final-report.md` and give the user:
+4. **When it completes**, record the run: `~/.claude/team/bin/team-metrics "DIR" run dev` with
+   `--tokens`, `--duration-ms` and `--agents` from the completion notice's usage
+   (`subagent_tokens`, `duration_ms`, `agent_count`); leave out any it does not give.
+   Then read `DIR/final-report.md` and give the user:
    - approved or incomplete, and how many iterations it took
    - 3–6 lines of the essentials: what was built, and for an incomplete run what is still open
    - what only a person can do before merging (the report's "Pendiente para una persona")

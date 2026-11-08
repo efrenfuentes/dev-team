@@ -2,6 +2,7 @@
 # Status of every feature workspace under <repo>/.team/. Run from anywhere inside the repo.
 #
 #   team-status [--json] [--offline]
+#   team-status --metrics [--json]     # the metrics of every feature instead (team-metrics --repo)
 #
 # Per feature: branch, base, plan rounds and verdict, code iterations and verdict, phase
 # (planning | planned | developing | responding | approved | incomplete | merged | closed),
@@ -16,6 +17,7 @@ set -euo pipefail
 # shellcheck source=/dev/null
 . "$HOME/.claude/team/lib.sh"
 repo=$(team_main_repo)
+if [ "${1:-}" = --metrics ]; then exec "$TEAM/bin/team-metrics" --repo "${2:-}"; fi
 json="" offline=false
 for a in "$@"; do
   case "$a" in --json) json=--json ;; --offline) offline=true ;; *) echo "unknown option: $a" >&2; exit 2 ;; esac
@@ -83,7 +85,8 @@ for dir in "$repo"/.team/[0-9][0-9][0-9]-*/; do
     --argjson unchecked "${unchecked:-0}" --argjson manual "$manual" --argjson human "${human:-0}" \
     --argjson final "$([ -f "$dir/final-report.md" ] && echo true || echo false)" \
     --argjson pr "$(jq '.pr.url // null' "$state")" --arg pr_state "$pr_state" --argjson peek "$peek" \
-    '{id: $id, phase: $phase, branch: $branch, base: $base, worktree: $worktree,
+    --argjson kind "$(jq '.kind // "feature"' "$state")" --argjson issue "$(jq '.issue // null' "$state")" \
+    '{id: $id, kind: $kind, issue: $issue, phase: $phase, branch: $branch, base: $base, worktree: $worktree,
       plan: {rounds: $plan_n, max: $plan_max, verdict: $plan_v},
       code: {iterations: $code_n, max: $code_max, verdict: $code_v},
       unchecked_tasks: $unchecked, manual_items: $manual, human_findings: $human, final_report: $final,

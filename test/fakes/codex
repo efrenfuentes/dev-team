@@ -4,6 +4,8 @@
 # codex-plan.json, final report → codex-final.md, otherwise codex-code.json. Each prompt is saved
 # as $FAKE_DIR/prompts/<n>-<kind>.md. FAKE_CODEX_FAIL=<kind> makes that kind exit 1.
 set -u
+# `codex login status`: logged in unless FAKE_CODEX_LOGIN=0.
+[ "${1:-}" = login ] && exit $(( ${FAKE_CODEX_LOGIN:-1} == 1 ? 0 : 1 ))
 out=""
 while [ $# -gt 0 ]; do
   case "$1" in -o) out=$2; shift ;; esac

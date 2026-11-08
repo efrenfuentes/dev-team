@@ -71,6 +71,20 @@ repository root as usual.
    commands run with results, decisions you made. This log is for the human. The reviewer does
    not read it, so anything it must know has to be visible in the code, tests or commits.
 
+## Bug fixes
+
+If `<dir>/issue.md` exists, the feature is a fix for that GitHub issue (`/team-fix`). Test first:
+
+1. T1, the regression test, comes before any change to the code. Write it, run it and check that
+   it fails **for the reason the issue reports** (not a typo, a missing fixture or a compile
+   error). Paste the failing output in dev-log.md, and commit the test on its own
+   (`test(scope): reproduce #<n>`).
+2. Then fix the cause, not the symptom, and commit the fix (`fix(scope): … (#<n>)`). The
+   regression test now passes without being changed; if it had to change, say why in dev-log.md.
+3. If the test passes before your fix, the bug is not what the spec says or not where it says:
+   do not fix anything blind. Leave T1 unchecked, describe what you found in dev-log.md, and
+   return `blocked: true`.
+
 ## Rules
 
 - Stay in scope: do what the tasks say. Do not refactor unrelated code or fix pre-existing

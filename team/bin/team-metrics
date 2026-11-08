@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Metrics of the team's work, from what the features already record. Prints JSON.
+#
+#   team-metrics <feature_dir>                     # one feature
+#   team-metrics --repo [--json]                   # every feature of the repo, plus totals
+#   team-metrics <feature_dir> run <kind> [--tokens N] [--duration-ms N] [--agents N]
+#                                                  # record a workflow run (plan, dev, respond, fix)
+#
+# Per feature: plan rounds and code iterations with their findings by severity, whether and at
+# which iteration the code was approved, gate runs, failures and repair rounds, tasks by kind
+# (T plan, R reviewer, H PR comments, C CI checks), /team-respond rounds, syncs, the recorded
+# workflow runs (tokens, duration, agents) and the timeline: created, first review, approved,
+# PR opened, merged, with the hours from creation to approval and to merge.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+mtime() { perl -e 'my @s = stat shift; print @s ? $s[9] : ""' "$1"; }
+iso() { [ -n "$1" ] && date -u -d "@$1" +%FT%TZ 2>/dev/null || { [ -n "$1" ] && date -u -r "$1" +%FT%TZ; }; }
+
+feature() { # <feature_dir> → JSON
+  local dir=$1 state="$1/state.json" first="" approved_at="" last code_n
+  code_n=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | wc -l | tr -d ' ')
+  [ -f "$dir/reviews/code-1.json" ] && first=$(iso "$(mtime "$dir/reviews/code-1.json")")
+  # The first approval: later iterations (a /team-respond round) do not move it.
+  for f in $(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | sort -V); do
+    if [ "$(jq -r .verdict "$f")" = APPROVED ]; then approved_at=$(iso "$(mtime "$f")"); break; fi
+  done
+  last=$(find "$dir/reviews" -name 'code-*.json' 2>/dev/null | sort -V | tail -1)
+
+  jq -n --arg id "$(basename "$dir")" --slurpfile st "$state" \
+    --argjson code "$(find "$dir/reviews" -name 'code-*.json' -print0 2>/dev/null | sort -zV | xargs -0r cat | jq -s .)" \
+    --argjson plan "$(find "$dir/reviews" -name 'plan-*.json' -print0 2>/dev/null | sort -zV | xargs -0r cat | jq -s .)" \
+    --argjson gates "$(find "$dir/gates" -name 'iter-*.json' -exec cat {} + 2>/dev/null | jq -s .)" \
+    --argjson repairs "$(find "$dir/gates" -name 'iter-*-try-*.json' 2>/dev/null | wc -l | tr -d ' ')" \
+    --argjson respond "$(find "$dir/respond" -name tasks.json 2>/dev/null | wc -l | tr -d ' ')" \
+    --arg tasks "$(cat "$dir/tasks.md" 2>/dev/null)" \
+    --arg first "$first" --arg approved "$approved_at" \
+    --arg last_verdict "$([ -n "$last" ] && jq -r .verdict "$last")" --argjson code_n "$code_n" '
+    def sev: reduce (.[] | .findings[]? | .severity) as $s ({blocker: 0, major: 0, minor: 0, human: 0}; .[$s] += 1);
+    def hours($a; $b): if $a == null or $b == null then null
+      else ((($b | fromdateiso8601) - ($a | fromdateiso8601)) / 3600 * 10 | round / 10) end;
+    def ntask($p): [$tasks | scan("(?m)^- \\[[ xX]\\] " + $p + "[0-9]")] | length;
+    $st[0] as $s
+    | ($s.metrics.runs // []) as $runs
+    | (if $approved == "" then null else $approved end) as $appr
+    | {id: $id, kind: ($s.kind // "feature"),
+       plan: {rounds: ($plan | length), findings: ($plan | sev)},
+       code: {iterations: $code_n, verdict: (if $last_verdict == "" then null else $last_verdict end),
+              approved_at_iteration: ([$code[] | select(.verdict == "APPROVED") | .iteration] | first),
+              findings: ($code | sev)},
+       gates: {runs: ($gates | length), failed: ([$gates[] | select(.passed == false)] | length), repair_rounds: $repairs},
+       tasks: {plan: ntask("T"), reviewer: ntask("R"), pr_comments: ntask("H"), ci: ntask("C")},
+       respond_rounds: $respond, syncs: (($s.syncs // []) | length),
+       runs: {count: ($runs | length), tokens: ([$runs[].tokens // 0] | add // 0),
+              duration_min: (([$runs[].duration_ms // 0] | add // 0) / 60000 | round),
+              agents: ([$runs[].agents // 0] | add // 0), by_kind: ($runs | group_by(.kind) | map({key: .[0].kind, value: length}) | from_entries)},
+       timeline: {created: $s.created, first_review: (if $first == "" then null else $first end), approved: $appr,
+                  pr_opened: ($s.pr.shipped // null), merged: ($s.pr.merged_at // null),
+                  hours_to_approval: hours($s.created; $appr), hours_to_merge: hours($s.created; $s.pr.merged_at)}}'
+}
+
+if [ "${1:-}" = --repo ]; then
+  repo=$(team_main_repo) || { echo '{"ok": false, "error": "not inside a git repository"}'; exit 1; }
+  rows=()
+  for d in "$repo"/.team/[0-9][0-9][0-9]-*/; do
+    d=${d%/}
+    [ -f "$d/state.json" ] && rows+=("$(feature "$d")")
+  done
+  all=$(printf '%s\n' "${rows[@]+"${rows[@]}"}" | jq -s .)
+  summary=$(jq '
+    def avg(f): (map(f) | map(select(. != null))) as $v | if ($v | length) == 0 then null else (($v | add) / ($v | length) * 10 | round / 10) end;
+    {features: length,
+     approved: map(select(.code.approved_at_iteration != null)) | length,
+     avg_iterations_to_approval: avg(.code.approved_at_iteration),
+     avg_plan_rounds: avg(select(.plan.rounds > 0) | .plan.rounds),
+     findings: (map(.code.findings) | if length == 0 then {} else reduce .[] as $f ({}; . as $acc | $f | to_entries | reduce .[] as $e ($acc; .[$e.key] += $e.value)) end),
+     gate_repair_rounds: (map(.gates.repair_rounds) | add // 0),
+     tokens: (map(.runs.tokens) | add // 0),
+     avg_hours_to_approval: avg(.timeline.hours_to_approval),
+     avg_hours_to_merge: avg(.timeline.hours_to_merge)}' <<<"$all")
+  if [ "${2:-}" = --json ]; then
+    jq -n --argjson f "$all" --argjson s "$summary" '{features: $f, summary: $s}'
+    exit 0
+  fi
+  {
+    echo "FEATURE|TIPO|PLAN|ITER. HASTA APROBAR|HALLAZGOS B/M/m/H|REPARACIONES GATES|TAREAS R/H/C|TOKENS|HORAS A APROBAR|HORAS A MERGE"
+    jq -r '.[] | [.id, .kind, (.plan.rounds | tostring),
+      (.code.approved_at_iteration // "-" | tostring),
+      (.code.findings | "\(.blocker)/\(.major)/\(.minor)/\(.human)"),
+      (.gates.repair_rounds | tostring),
+      (.tasks | "\(.reviewer)/\(.pr_comments)/\(.ci)"),
+      (if .runs.tokens > 0 then (.runs.tokens | tostring) else "-" end),
+      (.timeline.hours_to_approval // "-" | tostring), (.timeline.hours_to_merge // "-" | tostring)] | join("|")' <<<"$all"
+  } | column -t -s '|'
+  echo
+  jq -r '"\(.features) features · \(.approved) aprobadas · iteraciones hasta aprobar (prom.): \(.avg_iterations_to_approval // "-") · rondas de plan (prom.): \(.avg_plan_rounds // "-") · reparaciones de gates: \(.gate_repair_rounds) · tokens registrados: \(.tokens)"' <<<"$summary"
+  exit 0
+fi
+
+dir=$(cd "${1:?usage: team-metrics <feature_dir> [run <kind> ...] | --repo [--json]}" && pwd)
+[ -f "$dir/state.json" ] || { jq -n --arg d "$dir" '{ok: false, feature_dir: $d, error: "missing state.json"}'; exit 1; }
+
+if [ "${2:-}" = run ]; then
+  kind=${3:?usage: team-metrics <feature_dir> run <kind> [--tokens N] [--duration-ms N] [--agents N]}
+  shift 3
+  tokens=null duration=null agents=null
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tokens) tokens=$2; shift ;;
+      --duration-ms) duration=$2; shift ;;
+      --agents) agents=$2; shift ;;
+      *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+    shift
+  done
+  for v in "$tokens" "$duration" "$agents"; do
+    [ "$v" = null ] || [[ "$v" =~ ^[0-9]+$ ]] || { echo "not a number: $v" >&2; exit 2; }
+  done
+  team_state_set "$dir" '.metrics.runs = ((.metrics.runs // []) + [{kind: $k, at: $at, tokens: $t, duration_ms: $d, agents: $a}])' \
+    --arg k "$kind" --arg at "$(date -u +%FT%TZ)" --argjson t "$tokens" --argjson d "$duration" --argjson a "$agents"
+fi
+feature "$dir"

@@ -18,6 +18,11 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
     la causa. Saltar, desactivar o relajar un test, una regla de lint o el check para que pase es
     `blocker`.
   - **No leas `dev-log.md`**: es la narrativa del Developer y te sesgaría. Juzga el código.
+  - Si existe `issue.md`, es el arreglo de un issue de GitHub: debe haber un test de regresión
+    que reproduzca el problema del issue y que fallaría sin el arreglo (búscalo en un commit de
+    test anterior al del arreglo, y razona contra el código previo). Sin ese test, o con uno que
+    no ejercita la causa, es `major`. Un arreglo del síntoma que deja la causa intacta también
+    es `major`. Cambios ajenos al issue van como `minor` (o `major` si son riesgosos).
 - Iteración **{{ITER}} de {{MAX_ITER}}**. En la iteración {{MAX_ITER}} ya no hay más correcciones.
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz. Son criterio de revisión.
 - Cambios acumulados: `git diff {{BASE_SHA}}..{{HEAD_SHA}}` y `git log --oneline {{BASE_SHA}}..{{HEAD_SHA}}`

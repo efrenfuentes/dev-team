@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Start a bug fix from a GitHub issue: a feature workspace of kind "fix", with the issue in it.
+# Prints JSON.
+#
+#   team-issue <number | issue URL> [base_ref]
+#
+# Reads the issue with gh (title, body, labels, comments) from the repo of the current directory
+# and runs team-init with the slug fix-<n>-<title>, on a TEAM_FIX_BRANCH_PREFIX branch (fix/).
+# Writes <feature_dir>/issue.md (what the Planner and the Developer read) and records
+# kind: "fix" and issue: {number, url, title, state} in state.json.
+# A feature already started for the same issue is not duplicated: its directory comes back with
+# existing: true, so the fix can be resumed.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+. "$HOME/.claude/team/lib.sh"
+
+ref=${1:?usage: team-issue <number | issue URL> [base_ref]}
+base_ref=${2:-}
+fail() { jq -n --arg e "$1" '{ok: false, error: $e}'; exit 1; }
+
+command -v gh >/dev/null 2>&1 || fail "the GitHub CLI (gh) is not installed"
+gh auth status >/dev/null 2>&1 || fail "gh is not authenticated — run: gh auth login"
+main=$(team_main_repo) || fail "not inside a git repository"
+cd "$main" || exit 1
+
+if [[ "$ref" =~ github\.com/([^/]+)/([^/]+)/issues/([0-9]+) ]]; then
+  want="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+  number=${BASH_REMATCH[3]}
+  here=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || true)
+  lower() { tr '[:upper:]' '[:lower:]' <<<"$1"; }  # not ${x,,}: macOS ships bash 3.2
+  [ "$(lower "$here")" = "$(lower "$want")" ] || fail "the issue is in $want, but this repo is ${here:-unknown}: run /team-fix from a checkout of $want"
+elif [[ "$ref" =~ ^#?([0-9]+)$ ]]; then
+  number=${BASH_REMATCH[1]}
+else
+  fail "not an issue number or URL: $ref"
+fi
+
+# The same issue already has a feature: resume it instead.
+for d in "$main"/.team/[0-9][0-9][0-9]-*/; do
+  d=${d%/}
+  [ -f "$d/state.json" ] || continue
+  if [ "$(jq -r '.issue.number // empty' "$d/state.json")" = "$number" ]; then
+    jq -n --arg d "$d" --slurpfile s "$d/state.json" \
+      '{ok: true, existing: true, feature_dir: $d, issue: $s[0].issue, worktree: $s[0].worktree, branch: $s[0].branch}'
+    exit 0
+  fi
+done
+
+issue=$(gh issue view "$number" --json number,title,body,url,state,labels,author,comments 2>&1) ||
+  fail "gh issue view $number failed: $(head -3 <<<"$issue" | tr '\n' ' ')"
+
+title=$(jq -r .title <<<"$issue")
+words=$(tr '[:upper:]' '[:lower:]' <<<"$title" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null || tr '[:upper:]' '[:lower:]' <<<"$title")
+words=$(sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' <<<"$words" | cut -c1-40 | sed -E 's/-+$//')
+slug="fix-$number${words:+-$words}"
+
+dir=$(TEAM_BRANCH_PREFIX="$TEAM_FIX_BRANCH_PREFIX" "$TEAM/bin/team-init" "$slug" ${base_ref:+"$base_ref"}) ||
+  fail "team-init failed for $slug"
+
+jq -r '
+  "# Issue #\(.number): \(.title)\n",
+  "- URL: \(.url)",
+  "- Estado: \(.state)",
+  "- Autor: @\(.author.login // "?")",
+  "- Etiquetas: \(if (.labels | length) > 0 then (.labels | map(.name) | join(", ")) else "ninguna" end)\n",
+  "## Descripción\n",
+  (if (.body // "") == "" then "_Sin descripción._" else .body end),
+  (if (.comments | length) > 0 then "\n## Comentarios\n" else empty end),
+  (.comments[] | "### @\(.author.login // "?") — \(.createdAt // "")\n\n\(.body)\n")' <<<"$issue" >"$dir/issue.md"
+
+team_state_set "$dir" '.kind = "fix" | .issue = $i' \
+  --argjson i "$(jq -c '{number, url, title, state}' <<<"$issue")"
+jq -n --arg d "$dir" --slurpfile s "$dir/state.json" \
+  '{ok: true, existing: false, feature_dir: $d, issue: $s[0].issue, worktree: $s[0].worktree, branch: $s[0].branch,
+    issue_md: ($d + "/issue.md")}'

@@ -7,7 +7,8 @@
 # The PR goes from the feature branch to the base branch of base_ref (origin/main → main on
 # origin). Its body is <feature_dir>/pr-body.md: --check writes a draft from final-report.md,
 # spec.md and the commits, and never overwrites one that already exists, so it can be edited
-# before --push. The title defaults to the spec's first heading.
+# before --push. The title defaults to the spec's first heading. A fix started from an issue
+# (/team-fix) gets "Closes #<n>" in the body, so merging the PR closes the issue.
 #
 # Refuses a worktree with uncommitted changes (they would not be in the PR) and a branch with no
 # commits over the base. Never force-pushes. If the branch already has an open PR, --push only
@@ -106,8 +107,10 @@ if [ ! -f "$body" ]; then
   # be bullets or numbered, and wrap over indented lines, which are joined into one checkbox.
   manual=$(section "$dir/final-report.md" "Pendiente para una persona" | checklist)
   [ -n "$manual" ] || manual=$(section "$dir/tasks.md" "Verificación manual" | checklist)
+  issue_n=$(jq -r '.issue.number // empty' "$state")
   {
     echo "## Resumen"; echo; echo "${summary:-_Sin resumen._}"; echo
+    if [ -n "$issue_n" ]; then echo "Closes #$issue_n"; echo; fi
     if [ -n "$built" ]; then echo "## Qué se implementó"; echo; echo "$built"; echo; fi
     if [ -n "$manual" ]; then echo "## Verificación manual pendiente"; echo; echo "$manual"; echo; fi
     echo "## Commits"; echo
@@ -154,5 +157,6 @@ else
   created=true
 fi
 
-team_state_set "$dir" '.pr = {url: $u, shipped: $t}' --arg u "$url" --arg t "$(date -u +%FT%TZ)"
+# shipped is when the PR was opened (kept on later pushes); pushed, the latest push.
+team_state_set "$dir" '.pr = ((.pr // {}) + {url: $u, pushed: $t}) | .pr.shipped //= $t' --arg u "$url" --arg t "$(date -u +%FT%TZ)"
 summary_json "$(jq -n --arg u "$url" --argjson c "$created" --argjson dr "$draft" '{pr_url: $u, pr_created: $c, draft: (if $c then $dr else null end)}')"
