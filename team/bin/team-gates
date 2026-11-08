@@ -5,6 +5,8 @@
 #                                     # (a rerun after a gate repair keeps the earlier run as
 #                                     #  gates/iter-N-try-K.{log,json}; iter-N.* is always the latest)
 #   team-gates <feature_dir>          # the Developer's own check before committing → gates/check.{log,json}
+#                                     # (an official run on the very same tree reuses it instead of
+#                                     #  running the suite twice; TEAM_GATES_REUSE=0 turns that off)
 #   team-gates <feature_dir> --which  # which gate script would run, without running it
 #
 # Gate script lookup: <main>/.team/gates.sh (source "project"), then
@@ -17,7 +19,7 @@
 set -uo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 
 dir=$(cd "${1:?usage: team-gates <feature_dir> [iter | --which]}" && pwd)
 iter=${2:-}
@@ -50,6 +52,28 @@ if [ -z "$script" ]; then
   exit 0
 fi
 
+# Hash of the tree the gates run on: the working tree as it would be committed (tracked and
+# untracked files, ignored ones left out) for the Developer's check, so that the official run
+# after the commit can tell whether it is looking at the very same code.
+tree_hash() {
+  local idx
+  idx=$(mktemp)
+  cp "$(git rev-parse --git-path index)" "$idx" 2>/dev/null || true
+  GIT_INDEX_FILE=$idx git add -A . >/dev/null 2>&1 && GIT_INDEX_FILE=$idx git write-tree 2>/dev/null
+  rm -f "$idx"
+}
+tree=$(tree_hash || true)
+
+# An official run on exactly the tree the Developer already checked, with the same script, would
+# run the same suite twice: reuse that check instead (TEAM_GATES_REUSE=0 always runs).
+check="$dir/gates/check.json"
+if [ -n "$iter" ] && [ "${TEAM_GATES_REUSE:-1}" = 1 ] && [ -f "$check" ] && [ -n "$tree" ] &&
+  [ "$(jq -r --arg t "$tree" --arg s "$script" '(.passed == true and .configured == true and .tree == $t and .script == $s)' "$check")" = true ]; then
+  { echo "== reused the Developer's own check of this same tree ($tree); its log follows"; echo; cat "$dir/gates/check.log" 2>/dev/null; } >"$log"
+  jq --arg log "$log" '. + {log: $log, reused_check: true}' "$check" | tee "$json"
+  exit 0
+fi
+
 if team_gates_serialized "$dir"; then
   lock="$(git rev-parse --path-format=absolute --git-common-dir)/team-gates.lock"
   echo "== waiting for the gates lock ($lock)" >"$log"
@@ -59,5 +83,6 @@ else
 fi
 code=$?
 jq -n --argjson passed "$([ $code -eq 0 ] && echo true || echo false)" --arg script "$script" \
-  --arg src "$source" --arg log "$log" --argjson code $code \
-  '{passed: $passed, configured: true, script: $script, source: $src, exit_code: $code, log: $log}' | tee "$json"
+  --arg src "$source" --arg log "$log" --argjson code $code --arg tree "$tree" \
+  '{passed: $passed, configured: true, script: $script, source: $src, exit_code: $code, log: $log,
+    tree: (if $tree == "" then null else $tree end)}' | tee "$json"

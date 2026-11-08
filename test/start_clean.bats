@@ -30,6 +30,13 @@ start() { run --separate-stderr "$BIN/team-start" "$DIR" "$@"; }
   [[ "$(jq -r .error <<<"$output")" == "missing plan.md"* ]]
 }
 
+@test "team-start refuses the feature's base branch whatever its name" {
+  git switch -q -c trunk; git push -q origin trunk; git fetch -q origin
+  DIR=$(TEAM_WORKTREES=0 "$BIN/team-init" onbase origin/trunk); plan_feature
+  start
+  [ "$status" -ne 0 ]; [[ "$(jq -r .error <<<"$output")" == "on the base branch 'trunk'"* ]]
+}
+
 @test "team-start resumes after the last review and stops when approved or out of reviews" {
   write_review 1 CHANGES_REQUESTED
   start; [ "$(jq -c '[.start_iter, .finished]' <<<"$output")" = '[2,false]' ]

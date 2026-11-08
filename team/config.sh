@@ -57,6 +57,11 @@ TEAM_GATES_LOCK=${TEAM_GATES_LOCK:-0}
 # 0 turns them off: such a repo then runs with no gates.
 TEAM_STACK_GATES=${TEAM_STACK_GATES:-1}
 
+# The Developer runs the gates itself before committing (gates/check.json). When the official run
+# after the iteration finds the committed tree identical to the one that check passed on, with the
+# same gate script, it reuses that check instead of running the suite again. 0 always runs.
+TEAM_GATES_REUSE=${TEAM_GATES_REUSE:-1}
+
 # After each dev loop, an agent turns what the Reviewer and the PR's reviewers had to ask for into
 # rules in <repo>/.team/conventions.md, which the Developer and the Planner follow in later
 # features. 0 turns it off (the file is still read if it exists).

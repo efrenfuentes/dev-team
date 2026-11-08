@@ -26,6 +26,9 @@ comments. Pushing and posting on the PR are outward-facing: confirm each with th
      `gh pr checks <pr> --watch --interval 30` in the background, then fetch again (the same round
      is reused).
    With `count: 0` and no pending checks, say there is nothing new on the PR and stop.
+   If `truncated` is not empty, the PR has more than 100 of those (threads, reviews, comments or
+   checks) and only the first 100 were read: warn the user that some feedback may be missing and
+   that the rest should be checked on GitHub.
 
 3. **Triage.** Read every item (`DIR/respond/round-N/feedback.json`), with the code it points at
    (`path`, `line`) in the worktree. Sort each one into:

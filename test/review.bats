@@ -33,6 +33,34 @@ review() { run --separate-stderr "$BIN/team-review" "$@"; }
   [ "$(jq -r .model_verdict "$DIR/reviews/code-1.json")" = APPROVED ]
 }
 
+@test "a CHANGES_REQUESTED with nothing blocking is upgraded, and adds no task" {
+  codex_says code CHANGES_REQUESTED "[$(finding minor estilo),$(finding human probar)]"
+  review code "$DIR" 1
+  [ "$(jq -c '[.verdict, .blocking, .unresolved_previous]' <<<"$output")" = '["APPROVED",0,0]' ]
+  [ "$(jq -r .model_verdict "$DIR/reviews/code-1.json")" = CHANGES_REQUESTED ]
+  ! grep -q 'Correcciones' "$DIR/tasks.md"
+  # ...but not when a previous finding is still open, or the security pass found something.
+  codex_says code CHANGES_REQUESTED "[]" '[{"id":"R1-01","status":"unresolved","note":"falta"}]'
+  review code "$DIR" 2
+  [ "$(jq -r .verdict <<<"$output")" = CHANGES_REQUESTED ]
+}
+
+@test "the security pass alone keeps a review from being approved" {
+  codex_says code CHANGES_REQUESTED "[$(finding minor estilo)]"
+  codex_says security CHANGES_REQUESTED "[$(finding blocker idor)]"
+  review code "$DIR" 1
+  [ "$(jq -c '[.verdict, .blocking]' <<<"$output")" = '["CHANGES_REQUESTED",1]' ]
+}
+
+@test "unconfigured gates are reported to the reviewer as none, not as passed" {
+  echo '{"passed": true, "configured": false}' >"$DIR/gates/iter-1.json"
+  codex_says code APPROVED
+  review code "$DIR" 1
+  [ "$(jq -r .verdict <<<"$output")" = APPROVED ]
+  grep -q 'gates: none' "$DIR/review-report.md"
+  grep -q 'passed=`none`' "$FAKE_DIR"/prompts/*-code.md
+}
+
 @test "failing gates can never be approved" {
   echo '{"passed": false}' >"$DIR/gates/iter-1.json"
   codex_says code APPROVED

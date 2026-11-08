@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 repo=$(team_main_repo)
 if [ "${1:-}" = --metrics ]; then exec "$TEAM/bin/team-metrics" --repo "${2:-}"; fi
 json="" offline=false

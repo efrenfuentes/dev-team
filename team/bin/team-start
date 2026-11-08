@@ -17,7 +17,7 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 dir=$(cd "${1:?usage: team-start <feature_dir> [--reset]}" && pwd)
 reset=${2:-}
 state="$dir/state.json"
@@ -49,10 +49,14 @@ cd "$repo"
 [ -s "$dir/plan.md" ] || fail "missing plan.md — run /team-plan first"
 
 branch=$(git branch --show-current)
+# The feature's own base branch (origin/trunk → trunk) is protected too, whatever its name.
+base_branch=""
+read -r _ base_branch <<<"$(team_base_remote "$dir" || true)"
 case "$branch" in
   "" ) fail "detached HEAD — switch to a feature branch" ;;
   main | master | develop ) fail "on protected branch '$branch' — create a feature branch first" ;;
 esac
+[ -z "$base_branch" ] || [ "$branch" != "$base_branch" ] || fail "on the base branch '$branch' — create a feature branch first"
 if [ "$has_wt" = true ]; then
   want=$(jq -r '.branch // empty' "$state")
   [ "$branch" = "$want" ] || fail "the worktree $repo is on '$branch', not on the feature branch '$want' — switch it back"

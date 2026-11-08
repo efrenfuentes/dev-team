@@ -9,7 +9,7 @@
 set -euo pipefail
 
 src=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-claude="$HOME/.claude"
+claude="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 backup="$claude/backups/dev-team-$(date +%Y%m%d-%H%M%S)"
 
 # destino → origen

@@ -16,7 +16,7 @@
 set -uo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 
 dir=$(cd "${1:?usage: team-setup <feature_dir>}" && pwd)
 team_feature_env "$dir"

@@ -11,7 +11,8 @@
 # keeps what nobody answered yet: unresolved review threads whose last comment is not ours, review
 # bodies (changes requested / commented) and conversation comments. Bots, our own replies (marked
 # with <!-- dev-team -->) and items already handled in earlier rounds (.respond.seen) are skipped.
-# It also reads the checks of the PR's head commit: each failing one (GitHub Actions job or commit
+# Every list is read in one page of 100; the ones with more are named in the output's .truncated
+# (threads, reviews, comments, checks). It also reads the checks of the PR's head commit: each failing one (GitHub Actions job or commit
 # status) becomes an item of kind "check", with the failed steps' log of an Actions job saved as
 # respond/round-N/ci-<job>.log. The output's .ci sums them up (passing / failing / pending, and
 # stale when the local branch has commits the PR does not have yet).
@@ -32,7 +33,7 @@
 set -uo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 
 MARKER='<!-- dev-team -->'
 
@@ -71,11 +72,11 @@ read_pr() { # <out>
   query='query($owner: String!, $name: String!, $n: Int!) {
     repository(owner: $owner, name: $name) { pullRequest(number: $n) {
       state mergedAt
-      reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine
+      reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { id isResolved isOutdated path line originalLine
         comments(first: 100) { nodes { databaseId body url author { login __typename } } } } }
-      reviews(first: 100) { nodes { databaseId state body url author { login __typename } } }
-      comments(first: 100) { nodes { databaseId body url author { login __typename } } }
-      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { nodes {
+      reviews(first: 100) { pageInfo { hasNextPage } nodes { databaseId state body url author { login __typename } } }
+      comments(first: 100) { pageInfo { hasNextPage } nodes { databaseId body url author { login __typename } } }
+      commits(last: 1) { nodes { commit { oid statusCheckRollup { state contexts(first: 100) { pageInfo { hasNextPage } nodes {
         __typename
         ... on CheckRun { databaseId name status conclusion detailsUrl
                           checkSuite { workflowRun { databaseId workflow { name } } } }
@@ -87,6 +88,15 @@ read_pr() { # <out>
   jq -e '.data.repository.pullRequest.state' "$1/raw.json" >/dev/null 2>&1 || fail "could not read the PR $url"
   team_state_set "$dir" '.pr.state = $p.state | .pr.merged_at = $p.mergedAt' \
     --argjson p "$(jq -c '.data.repository.pullRequest | {state, mergedAt}' "$1/raw.json")"
+
+  # Each list is read in one page of 100. The connections that have more are named in
+  # <out>/truncated.json, so a big PR never loses feedback in silence.
+  jq -c '.data.repository.pullRequest
+    | [ (if .reviewThreads.pageInfo.hasNextPage then "threads" else empty end),
+        (if .reviews.pageInfo.hasNextPage then "reviews" else empty end),
+        (if .comments.pageInfo.hasNextPage then "comments" else empty end),
+        (if .commits.nodes[0].commit.statusCheckRollup.contexts.pageInfo.hasNextPage then "checks" else empty end) ]' \
+    "$1/raw.json" >"$1/truncated.json"
 
   jq --arg m "$MARKER" --argjson seen "$(jq '.respond.seen // []' "$state")" '
     .data.repository.pullRequest as $pr
@@ -175,9 +185,9 @@ case "$mode" in
 
     jq -n --arg d "$dir" --arg u "$url" --argjson r "$round" --arg f "$out/feedback.json" \
       --arg s "$(jq -r '.data.repository.pullRequest.state' "$out/raw.json")" --slurpfile items "$out/feedback.json" \
-      --slurpfile ci "$out/ci.json" '
+      --slurpfile ci "$out/ci.json" --slurpfile tr "$out/truncated.json" '
       {ok: true, feature_dir: $d, pr: $u, pr_state: $s, round: $r, feedback: $f,
-       count: ($items[0] | length), ci: $ci[0], items: $items[0]}'
+       count: ($items[0] | length), ci: $ci[0], truncated: $tr[0], items: $items[0]}'
     ;;
 
   tasks)
@@ -252,9 +262,10 @@ case "$mode" in
     trap 'rm -rf "$out"' EXIT
     read_pr "$out"
     jq -n --arg d "$dir" --arg u "$url" --slurpfile items "$out/feedback.json" --slurpfile ci "$out/ci.json" \
+      --slurpfile tr "$out/truncated.json" \
       --argjson p "$(jq -c '.data.repository.pullRequest | {state, mergedAt}' "$out/raw.json")" '
       {ok: true, feature_dir: $d, pr: $u, pr_state: $p.state, merged_at: $p.mergedAt,
-       comments: ([$items[0][] | select(.kind != "check")] | length), ci: $ci[0]}'
+       comments: ([$items[0][] | select(.kind != "check")] | length), ci: $ci[0], truncated: $tr[0]}'
     ;;
 
   *) fail "mode must be fetch, tasks, reply or peek" ;;

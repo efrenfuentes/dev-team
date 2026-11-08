@@ -6,7 +6,7 @@
 # git worktree, recorded as .worktree in state.json. Features created before worktrees existed
 # (no .worktree) keep working in the main checkout.
 
-TEAM="$HOME/.claude/team"
+TEAM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team"
 # shellcheck source=/dev/null
 . "$TEAM/config.sh"
 

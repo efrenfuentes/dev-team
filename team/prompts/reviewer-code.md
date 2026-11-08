@@ -27,7 +27,9 @@ y ejecutar comandos de lectura (git, grep, cat, etc.).
 - Convenciones del repo: `CLAUDE.md` / `AGENTS.md` en la raíz. Son criterio de revisión.
 - Cambios acumulados: `git diff {{BASE_SHA}}..{{HEAD_SHA}}` y `git log --oneline {{BASE_SHA}}..{{HEAD_SHA}}`
 - Cambios de esta iteración: `git diff {{PREV_SHA}}..{{HEAD_SHA}}`
-- Gates automáticos (tests y lint) de esta iteración: passed=`{{GATES_PASSED}}`, log en `{{GATES_LOG}}`
+- Gates automáticos (tests y lint) de esta iteración: passed=`{{GATES_PASSED}}`, log en `{{GATES_LOG}}`.
+  `none` significa que el repo no tiene gates: **nada se ejecutó**, así que verifica tú los tests
+  y el lint con más rigor (léelos, y corre los que puedas en modo solo lectura).
 - Revisiones anteriores (JSON, solo como referencia): {{PREV_REVIEWS}}
 
 ### Hallazgos previos aún abiertos

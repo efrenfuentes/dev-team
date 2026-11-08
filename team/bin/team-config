@@ -7,7 +7,7 @@
 set -euo pipefail
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/config.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/config.sh"
 
 base=$(jq -n \
   --argjson p "$TEAM_MAX_PLAN_ROUNDS" --argjson c "$TEAM_MAX_CODE_REVIEWS" --argjson g "$TEAM_GATE_FIX_ROUNDS" \

@@ -96,6 +96,34 @@ SH
   grep -q 'waiting for the gates lock' "$DIR/gates/iter-1.log"
 }
 
+@test "an official run reuses the Developer's check of the same committed tree" {
+  make_feature demo
+  printf 'echo run >>"%s/runs"\nexit 0\n' "$W" >.team/gates.sh
+  # The Developer checks a dirty tree, then commits exactly that tree.
+  echo x >"$WT/x.txt"
+  "$BIN/team-gates" "$DIR" >/dev/null
+  git -C "$WT" add x.txt; git -C "$WT" commit -qm "feat: x"
+  run --separate-stderr "$BIN/team-gates" "$DIR" 1
+  [ "$(jq -c '[.passed, .reused_check]' <<<"$output")" = '[true,true]' ]
+  grep -q 'reused' "$DIR/gates/iter-1.log"
+  [ "$(wc -l <"$W/runs")" -eq 1 ]
+  # A different tree runs the gates again; so does TEAM_GATES_REUSE=0.
+  commit_file "$WT" y.txt y "feat: y"
+  run --separate-stderr "$BIN/team-gates" "$DIR" 2
+  [ "$(jq -c '[.passed, .reused_check]' <<<"$output")" = '[true,null]' ]
+  [ "$(wc -l <"$W/runs")" -eq 2 ]
+  "$BIN/team-gates" "$DIR" >/dev/null
+  TEAM_GATES_REUSE=0 "$BIN/team-gates" "$DIR" 3 >/dev/null
+  [ "$(jq .reused_check "$DIR/gates/iter-3.json")" = null ]
+  [ "$(wc -l <"$W/runs")" -eq 4 ]
+  # A failed check is never reused.
+  echo 'exit 1' >.team/gates.sh
+  "$BIN/team-gates" "$DIR" >/dev/null || true
+  echo 'exit 0' >.team/gates.sh
+  run --separate-stderr "$BIN/team-gates" "$DIR" 4
+  [ "$(jq -c '[.passed, .reused_check]' <<<"$output")" = '[true,null]' ]
+}
+
 @test "team-exec runs in the worktree with the feature env" {
   make_feature demo
   run "$BIN/team-exec" "$DIR" bash -c 'echo "$PWD $TEAM_PARTITION $(git branch --show-current)"'

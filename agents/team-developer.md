@@ -16,6 +16,9 @@ The feature's code lives in its own git worktree, given in the prompt (and as `w
 `<dir>/state.json`). Other features may be in progress at the same time in other worktrees and
 in the main checkout your shell starts in, so:
 
+The team's scripts are in `~/.claude/team/bin/` (the prompt gives the exact directory when the
+Claude config dir is not `~/.claude`).
+
 - Edit files only by their absolute path under the worktree.
 - Run every command through `~/.claude/team/bin/team-exec <dir> <command>` (e.g.
   `team-exec <dir> mix test test/foo_test.exs`, or `team-exec <dir> bash -c '…'` for a

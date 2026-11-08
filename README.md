@@ -34,7 +34,9 @@ git clone <url-de-este-repo> ~/Developer/dev-team
 Reinicia Claude Code después de instalar.
 
 > Las rutas `~/.claude/team/...` están fijas en las skills y los scripts, así que la
-> instalación siempre va en `~/.claude` del usuario.
+> instalación siempre va en `~/.claude` del usuario. Los scripts e `install.sh` respetan
+> `CLAUDE_CONFIG_DIR` si está definido, pero las skills y los agentes siguen nombrando
+> `~/.claude/team/bin/…` en su texto.
 
 ## Requisitos
 
@@ -211,6 +213,7 @@ una sola ejecución con variables de entorno:
 | `TEAM_STACK_GATES` | `1` (0 apaga los gates por defecto del stack) |
 | `TEAM_LEARN` | `1` (0 apaga el aprendizaje de convenciones) |
 | `TEAM_LEARN_MODEL` / `TEAM_LEARN_EFFORT` | `sonnet` / `medium` |
+| `TEAM_GATES_REUSE` | `1` (la corrida oficial reutiliza el chequeo del Developer si el árbol committeado es el mismo; 0 siempre corre) |
 
 Los modelos de Claude aceptan `opus`, `sonnet`, `haiku` o `fable`. Los esfuerzos aceptan
 `low`, `medium`, `high`, `xhigh` o `max`. Para ver la configuración actual:

@@ -16,7 +16,7 @@ n=${3:?n required}
 final_status=${4:-}
 
 # shellcheck source=/dev/null
-. "$HOME/.claude/team/lib.sh"
+. "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/team/lib.sh"
 # Codex reviews the feature's worktree (the main checkout for features without one).
 repo=$(team_worktree "$dir")
 cd "$repo"
@@ -78,15 +78,21 @@ open_findings() { # <json files in order...>
       else map("- **\(.id)** [\(.severity)] \(.title) — `\(.location)` · Tarea: \(.task)") | join("\n") end' "$@"
 }
 
-# Give findings stable ids (<prefix><n>-NN), and derive the verdict from the findings: an
-# APPROVED with an open blocker/major (new or carried over) is downgraded.
+# The verdict follows the findings, both ways: an APPROVED with an open blocker/major (new or
+# carried over) is downgraded, and a CHANGES_REQUESTED with nothing blocking is upgraded. The
+# model's own verdict is kept as model_verdict. Without this, a CHANGES_REQUESTED with only minors
+# would create no task and still cost the Developer an iteration with nothing to do.
+VERDICT_FROM_FINDINGS='
+  if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
+     or ([.previous_findings[] | select(.status != "resolved")] | length) > 0
+  then .verdict = "CHANGES_REQUESTED" else .verdict = "APPROVED" end'
+
+# Give findings stable ids (<prefix><n>-NN) and derive the verdict from the findings.
 normalize() { # <raw_json> <prefix> <out_json> [tag]   → ids <prefix><n>-<tag>NN
   jq --arg p "$2" --arg n "$n" --arg tag "${4:-}" --arg head "$HEAD_SHA" '
     .findings |= (to_entries | map(.value + {id: ($p + $n + "-" + $tag + ((.key + 1) | tostring | if length < 2 then "0" + . else . end))}))
     | .model_verdict = .verdict
-    | if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
-         or ([.previous_findings[] | select(.status != "resolved")] | length) > 0
-      then .verdict = "CHANGES_REQUESTED" else . end
+    | '"$VERDICT_FROM_FINDINGS"'
     | . + {iteration: ($n | tonumber), head_sha: $head}' "$1" >"$3"
 }
 
@@ -96,8 +102,7 @@ merge_security() { # <general_norm_json> <security_norm_json> <out_json>
     .findings += $sec[0].findings
     | .summary += "\n\n**Seguridad:** " + $sec[0].summary
     | .security_verdict = $sec[0].model_verdict
-    | if ([.findings[] | select(.severity == "blocker" or .severity == "major")] | length) > 0
-      then .verdict = "CHANGES_REQUESTED" else . end' "$1" >"$3"
+    | '"$VERDICT_FROM_FINDINGS" "$1" >"$3"
 }
 
 report_section() { # <json> <title>
@@ -157,7 +162,9 @@ case "$mode" in
     PREV_OPEN=$(open_findings $prev_files)
     gates_json="$dir/gates/iter-$n.json"
     GATES_LOG="$dir/gates/iter-$n.log"
-    GATES_PASSED=$([ -f "$gates_json" ] && jq -r '.passed' "$gates_json" || echo "unknown")
+    # "none" when the repo has no gates: the reviewer must not take an unconfigured run for a
+    # passing test suite.
+    GATES_PASSED=$([ -f "$gates_json" ] && jq -r 'if .configured == false then "none" else .passed end' "$gates_json" || echo "unknown")
 
     # First review only: a security-focused pass runs in parallel with the general one.
     sec_pid=""

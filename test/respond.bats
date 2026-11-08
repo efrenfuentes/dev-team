@@ -49,6 +49,18 @@ respond() { run --separate-stderr "$BIN/team-respond" "$DIR" "$@"; }
   [ "$(jq -r .pr.url "$DIR/state.json")" = https://github.com/o/r/pull/9 ]
 }
 
+@test "fetch names the lists GitHub truncated at 100" {
+  respond fetch
+  [ "$(jq -c .truncated <<<"$output")" = '[]' ]
+  jq '.data.repository.pullRequest.reviews.pageInfo = {hasNextPage: true}
+      | .data.repository.pullRequest.reviewThreads.pageInfo = {hasNextPage: true}' \
+    "$FAKE_DIR/graphql.json" >"$FAKE_DIR/g" && mv "$FAKE_DIR/g" "$FAKE_DIR/graphql.json"
+  respond fetch
+  [ "$(jq -c .truncated <<<"$output")" = '["threads","reviews"]' ]
+  respond peek
+  [ "$(jq -c .truncated <<<"$output")" = '["threads","reviews"]' ]
+}
+
 @test "fetch again before the triage reuses the round" {
   respond fetch; respond fetch
   [ "$(jq -r .round <<<"$output")" = 1 ]
